@@ -1,0 +1,6 @@
+.env
+*.log
+/goatlas
+/goatlas-*
+vendor/
+.DS_Store
