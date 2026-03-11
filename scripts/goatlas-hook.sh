@@ -17,7 +17,7 @@ install_hook() {
     cat > "$hook_file" << 'EOF'
 #!/bin/bash
 # GoAtlas auto-refresh: re-index + rebuild graph after each commit
-REPO_PATH="$(git rev-parse --toplevel)"
+REPO_PATH="$(git rev-parse --show-toplevel)"
 (goatlas index "$REPO_PATH" && goatlas build-graph) &>/dev/null &
 disown
 EOF
