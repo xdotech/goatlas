@@ -10,6 +10,7 @@ import (
 	"github.com/goatlas/goatlas/internal/graph"
 	"github.com/goatlas/goatlas/internal/indexer"
 	mcpserver "github.com/goatlas/goatlas/internal/mcp"
+	"github.com/goatlas/goatlas/internal/vector"
 	"github.com/spf13/cobra"
 )
 
@@ -49,13 +50,43 @@ var serveCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "⚠️  Neo4j not configured (graph tools disabled)")
 		}
 
+		// Select vector store: Qdrant if configured, otherwise pgvector (default).
+		var vectorSearcher *vector.Searcher
+		if cfg.GeminiAPIKey != "" {
+			var store vector.VectorStore
+			if cfg.QdrantURL != "" {
+				qc, err := vector.NewQdrantClient(ctx, cfg.QdrantURL)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "⚠️  Qdrant unavailable: %v\n", err)
+				} else {
+					defer qc.Close()
+					store = qc
+					fmt.Fprintln(os.Stderr, "✅ Vector store: Qdrant")
+				}
+			}
+			if store == nil {
+				store = vector.NewPgVectorStore(pool)
+				fmt.Fprintln(os.Stderr, "✅ Vector store: pgvector (PostgreSQL)")
+			}
+
+			embedder, err := vector.NewEmbedder(ctx, cfg.GeminiAPIKey)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Embedder unavailable: %v\n", err)
+			} else {
+				defer embedder.Close()
+				vectorSearcher = vector.NewSearcher(store, embedder)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "⚠️  GEMINI_API_KEY not set (semantic search disabled)")
+		}
+
 		indexerSvc := indexer.NewService(pool)
 		srv := mcpserver.NewServer(mcpserver.ServerConfig{
 			Config:      cfg,
 			RepoRoot:    cfg.RepoPath,
 			IndexerSvc:  indexerSvc,
 			Pool:        pool,
-			Searcher:    nil,
+			Searcher:    vectorSearcher,
 			GraphClient: graphClient,
 		})
 

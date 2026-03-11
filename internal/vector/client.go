@@ -12,9 +12,10 @@ import (
 const collectionName = "code_symbols"
 const vectorSize = 768
 
-// QdrantClient wraps the high-level Qdrant client.
+// QdrantClient wraps the Qdrant client and implements the VectorStore interface.
 type QdrantClient struct {
-	client *qdrant.Client
+	client            *qdrant.Client
+	collectionEnsured bool
 }
 
 // NewQdrantClient connects to Qdrant at the given URL (HTTP or bare host:port).
@@ -61,31 +62,42 @@ func (c *QdrantClient) Close() error {
 	return c.client.Close()
 }
 
-// EnsureCollection creates the collection if it does not exist.
-func (c *QdrantClient) EnsureCollection(ctx context.Context) error {
+// ensureCollection creates the collection if it does not exist.
+func (c *QdrantClient) ensureCollection(ctx context.Context) error {
+	if c.collectionEnsured {
+		return nil
+	}
 	names, err := c.client.ListCollections(ctx)
 	if err != nil {
 		return fmt.Errorf("list collections: %w", err)
 	}
 	for _, n := range names {
 		if n == collectionName {
+			c.collectionEnsured = true
 			return nil
 		}
 	}
 	size := uint64(vectorSize)
-	return c.client.CreateCollection(ctx, &qdrant.CreateCollection{
+	if err := c.client.CreateCollection(ctx, &qdrant.CreateCollection{
 		CollectionName: collectionName,
 		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size:     size,
 			Distance: qdrant.Distance_Cosine,
 		}),
-	})
+	}); err != nil {
+		return err
+	}
+	c.collectionEnsured = true
+	return nil
 }
 
 // UpsertPoints inserts or updates the given CodePoints in Qdrant.
 func (c *QdrantClient) UpsertPoints(ctx context.Context, points []CodePoint) error {
 	if len(points) == 0 {
 		return nil
+	}
+	if err := c.ensureCollection(ctx); err != nil {
+		return fmt.Errorf("ensure collection: %w", err)
 	}
 	qPoints := make([]*qdrant.PointStruct, len(points))
 	for i, p := range points {
@@ -105,6 +117,9 @@ func (c *QdrantClient) UpsertPoints(ctx context.Context, points []CodePoint) err
 
 // Search performs a nearest-neighbor search and returns matching results.
 func (c *QdrantClient) Search(ctx context.Context, vector []float32, limit int, filter map[string]string) ([]SearchResult, error) {
+	if err := c.ensureCollection(ctx); err != nil {
+		return nil, fmt.Errorf("ensure collection: %w", err)
+	}
 	var qFilter *qdrant.Filter
 	if len(filter) > 0 {
 		conditions := make([]*qdrant.Condition, 0, len(filter))

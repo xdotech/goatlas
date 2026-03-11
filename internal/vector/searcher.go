@@ -8,13 +8,13 @@ import (
 
 // Searcher performs semantic search using vector embeddings.
 type Searcher struct {
-	client   *QdrantClient
+	store    VectorStore
 	embedder *Embedder
 }
 
 // NewSearcher creates a Searcher.
-func NewSearcher(client *QdrantClient, embedder *Embedder) *Searcher {
-	return &Searcher{client: client, embedder: embedder}
+func NewSearcher(store VectorStore, embedder *Embedder) *Searcher {
+	return &Searcher{store: store, embedder: embedder}
 }
 
 // Search embeds the query and returns formatted nearest-neighbour results.
@@ -30,7 +30,7 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int, serviceF
 		filter["service"] = serviceFilter
 	}
 
-	results, err := s.client.Search(ctx, vec, limit, filter)
+	results, err := s.store.Search(ctx, vec, limit, filter)
 	if err != nil {
 		return "", fmt.Errorf("vector search: %w", err)
 	}

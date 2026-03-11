@@ -7,16 +7,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// VectorIndexer fetches symbols from Postgres, embeds them, and upserts into Qdrant.
+// VectorIndexer fetches symbols from Postgres, embeds them, and upserts into
+// the configured vector store (pgvector or Qdrant).
 type VectorIndexer struct {
 	pool     *pgxpool.Pool
-	client   *QdrantClient
+	store    VectorStore
 	embedder *Embedder
 }
 
 // NewVectorIndexer creates a VectorIndexer.
-func NewVectorIndexer(pool *pgxpool.Pool, client *QdrantClient, embedder *Embedder) *VectorIndexer {
-	return &VectorIndexer{pool: pool, client: client, embedder: embedder}
+func NewVectorIndexer(pool *pgxpool.Pool, store VectorStore, embedder *Embedder) *VectorIndexer {
+	return &VectorIndexer{pool: pool, store: store, embedder: embedder}
 }
 
 // IndexResult summarises an embedding run.
@@ -37,10 +38,6 @@ type symRow struct {
 
 // IndexRepository embeds all (or only new) function/method/interface symbols.
 func (vi *VectorIndexer) IndexRepository(ctx context.Context, force bool) (*IndexResult, error) {
-	if err := vi.client.EnsureCollection(ctx); err != nil {
-		return nil, fmt.Errorf("ensure collection: %w", err)
-	}
-
 	query := `
 		SELECT id, file_id, kind, name, qualified_name, signature, doc_comment
 		FROM symbols
@@ -139,7 +136,7 @@ func (vi *VectorIndexer) IndexRepository(ctx context.Context, force bool) (*Inde
 			ids[j] = s.ID
 		}
 
-		if err := vi.client.UpsertPoints(ctx, points); err != nil {
+		if err := vi.store.UpsertPoints(ctx, points); err != nil {
 			return nil, fmt.Errorf("upsert batch starting at %d: %w", i, err)
 		}
 

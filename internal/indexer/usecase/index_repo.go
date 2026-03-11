@@ -54,6 +54,8 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force 
 		return nil, fmt.Errorf("repo path not found: %w", err)
 	}
 
+	repo := filepath.Base(absPath)
+
 	err = filepath.WalkDir(absPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // skip unreadable entries
@@ -67,14 +69,14 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force 
 		if !isIndexableFile(path) {
 			return nil
 		}
-		return uc.indexFile(ctx, absPath, path, force, result)
+		return uc.indexFile(ctx, repo, absPath, path, force, result)
 	})
 
 	result.Duration = time.Since(start)
 	return result, err
 }
 
-func (uc *IndexRepoUseCase) indexFile(ctx context.Context, repoPath, filePath string, force bool, result *IndexResult) error {
+func (uc *IndexRepoUseCase) indexFile(ctx context.Context, repo, repoPath, filePath string, force bool, result *IndexResult) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil // skip unreadable files
@@ -83,7 +85,7 @@ func (uc *IndexRepoUseCase) indexFile(ctx context.Context, repoPath, filePath st
 	hash := fmt.Sprintf("%x", sha256.Sum256(content))
 	relPath, _ := filepath.Rel(repoPath, filePath)
 
-	existing, err := uc.fileRepo.GetByPath(ctx, relPath)
+	existing, err := uc.fileRepo.GetByPath(ctx, repo, relPath)
 	if err != nil {
 		return err
 	}
@@ -101,6 +103,7 @@ func (uc *IndexRepoUseCase) indexFile(ctx context.Context, repoPath, filePath st
 	endpoints, _ := extractEndpointsByExtension(filePath, parsed.Imports)
 
 	file := &domain.File{
+		Repo:   repo,
 		Path:   relPath,
 		Module: parsed.Module,
 		Hash:   hash,

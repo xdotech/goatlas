@@ -21,7 +21,7 @@ func NewGetFileSymbolsUseCase(fr domain.FileRepository, sr domain.SymbolReposito
 
 // Execute returns all symbols in the given file path.
 func (uc *GetFileSymbolsUseCase) Execute(ctx context.Context, path string) (string, error) {
-	file, err := uc.fileRepo.GetByPath(ctx, path)
+	file, err := uc.fileRepo.GetByPath(ctx, "", path)
 	if err != nil {
 		return "", err
 	}

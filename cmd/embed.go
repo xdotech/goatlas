@@ -15,7 +15,7 @@ var embedForce bool
 
 var embedCmd = &cobra.Command{
 	Use:   "embed",
-	Short: "Embed indexed symbols into the Qdrant vector database",
+	Short: "Embed indexed symbols into the vector database (pgvector or Qdrant)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -33,11 +33,20 @@ var embedCmd = &cobra.Command{
 		}
 		defer pool.Close()
 
-		qdrantClient, err := vector.NewQdrantClient(ctx, cfg.QdrantURL)
-		if err != nil {
-			return fmt.Errorf("connect qdrant: %w", err)
+		// Select vector store: Qdrant if configured, otherwise pgvector (default).
+		var store vector.VectorStore
+		if cfg.QdrantURL != "" {
+			fmt.Fprintln(os.Stderr, "📦 Using Qdrant vector store")
+			qc, err := vector.NewQdrantClient(ctx, cfg.QdrantURL)
+			if err != nil {
+				return fmt.Errorf("connect qdrant: %w", err)
+			}
+			defer qc.Close()
+			store = qc
+		} else {
+			fmt.Fprintln(os.Stderr, "📦 Using pgvector (PostgreSQL)")
+			store = vector.NewPgVectorStore(pool)
 		}
-		defer qdrantClient.Close()
 
 		embedder, err := vector.NewEmbedder(ctx, cfg.GeminiAPIKey)
 		if err != nil {
@@ -45,7 +54,7 @@ var embedCmd = &cobra.Command{
 		}
 		defer embedder.Close()
 
-		indexer := vector.NewVectorIndexer(pool, qdrantClient, embedder)
+		indexer := vector.NewVectorIndexer(pool, store, embedder)
 		result, err := indexer.IndexRepository(ctx, embedForce)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)

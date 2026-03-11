@@ -26,11 +26,18 @@ func (uc *GenerateEmbeddingsUseCase) Execute(ctx context.Context, force bool) (s
 		return "", fmt.Errorf("GEMINI_API_KEY not configured — cannot generate embeddings")
 	}
 
-	qdrantClient, err := vector.NewQdrantClient(ctx, uc.qdrantURL)
-	if err != nil {
-		return "", fmt.Errorf("connect qdrant: %w", err)
+	// Select vector store: Qdrant if configured, otherwise pgvector (default).
+	var store vector.VectorStore
+	if uc.qdrantURL != "" {
+		qc, err := vector.NewQdrantClient(ctx, uc.qdrantURL)
+		if err != nil {
+			return "", fmt.Errorf("connect qdrant: %w", err)
+		}
+		defer qc.Close()
+		store = qc
+	} else {
+		store = vector.NewPgVectorStore(uc.pool)
 	}
-	defer qdrantClient.Close()
 
 	embedder, err := vector.NewEmbedder(ctx, uc.apiKey)
 	if err != nil {
@@ -38,15 +45,19 @@ func (uc *GenerateEmbeddingsUseCase) Execute(ctx context.Context, force bool) (s
 	}
 	defer embedder.Close()
 
-	indexer := vector.NewVectorIndexer(uc.pool, qdrantClient, embedder)
+	indexer := vector.NewVectorIndexer(uc.pool, store, embedder)
 	result, err := indexer.IndexRepository(ctx, force)
 	if err != nil {
 		return "", err
 	}
 
+	backend := "pgvector"
+	if uc.qdrantURL != "" {
+		backend = "qdrant"
+	}
+
 	return fmt.Sprintf(
-		"Embedding complete\n  Embedded: %d\n  Skipped:  %d",
-		result.EmbeddedCount,
-		result.SkippedCount,
+		"Embedding complete (backend: %s)\n  Embedded: %d\n  Skipped:  %d",
+		backend, result.EmbeddedCount, result.SkippedCount,
 	), nil
 }

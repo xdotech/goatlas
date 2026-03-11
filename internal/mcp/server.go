@@ -59,4 +59,3 @@ func NewServer(cfg ServerConfig) *Server {
 func (s *Server) RunStdio() error {
 	return mcpgo.ServeStdio(s.mcpServer)
 }
-

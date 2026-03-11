@@ -8,6 +8,7 @@ import (
 // File represents an indexed Go source file.
 type File struct {
 	ID          int64
+	Repo        string
 	Path        string
 	Module      string
 	Hash        string
@@ -50,7 +51,7 @@ type Import struct {
 // FileRepository handles persistence of file records.
 type FileRepository interface {
 	Upsert(ctx context.Context, f *File) error
-	GetByPath(ctx context.Context, path string) (*File, error)
+	GetByPath(ctx context.Context, repo, path string) (*File, error)
 	DeleteByID(ctx context.Context, id int64) error
 }
 
