@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+
 	"github.com/spf13/viper"
 )
 
@@ -32,8 +34,13 @@ func Load() (*Config, error) {
 
 	_ = viper.ReadInConfig() // ignore missing .env file
 
+	repoPath := viper.GetString("REPO_PATH")
+	if repoPath == "" {
+		repoPath, _ = os.Getwd()
+	}
+
 	return &Config{
-		RepoPath:     viper.GetString("REPO_PATH"),
+		RepoPath:     repoPath,
 		DatabaseDSN:  viper.GetString("DATABASE_DSN"),
 		QdrantURL:    viper.GetString("QDRANT_URL"),
 		Neo4jURL:     viper.GetString("NEO4J_URL"),

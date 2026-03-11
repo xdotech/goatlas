@@ -10,16 +10,19 @@ import (
 
 // MCPHandler registers all MCP tools with the server.
 type MCPHandler struct {
-	searchCode     *usecase.SearchCodeUseCase
-	readFile       *usecase.ReadFileUseCase
-	findSymbol     *usecase.FindSymbolUseCase
-	findCallers    *usecase.FindCallersUseCase
-	listEndpoints  *usecase.ListEndpointsUseCase
-	getFileSymbols *usecase.GetFileSymbolsUseCase
-	listServices   *usecase.ListServicesUseCase
-	getServiceDeps *usecase.GetServiceDepsUseCase
-	getAPIHandlers *usecase.GetAPIHandlersUseCase
-	listComponents *usecase.ListComponentsUseCase
+	searchCode         *usecase.SearchCodeUseCase
+	readFile           *usecase.ReadFileUseCase
+	findSymbol         *usecase.FindSymbolUseCase
+	findCallers        *usecase.FindCallersUseCase
+	listEndpoints      *usecase.ListEndpointsUseCase
+	getFileSymbols     *usecase.GetFileSymbolsUseCase
+	listServices       *usecase.ListServicesUseCase
+	getServiceDeps     *usecase.GetServiceDepsUseCase
+	getAPIHandlers     *usecase.GetAPIHandlersUseCase
+	listComponents     *usecase.ListComponentsUseCase
+	indexRepo          *usecase.IndexRepoUseCase
+	generateEmbeddings *usecase.GenerateEmbeddingsUseCase
+	buildGraph         *usecase.BuildGraphUseCase
 }
 
 // NewMCPHandler constructs an MCPHandler with all use cases.
@@ -34,18 +37,24 @@ func NewMCPHandler(
 	gsd *usecase.GetServiceDepsUseCase,
 	gah *usecase.GetAPIHandlersUseCase,
 	lc *usecase.ListComponentsUseCase,
+	ir *usecase.IndexRepoUseCase,
+	ge *usecase.GenerateEmbeddingsUseCase,
+	bg *usecase.BuildGraphUseCase,
 ) *MCPHandler {
 	return &MCPHandler{
-		searchCode:     sc,
-		readFile:       rf,
-		findSymbol:     fs,
-		findCallers:    fc,
-		listEndpoints:  le,
-		getFileSymbols: gfs,
-		listServices:   ls,
-		getServiceDeps: gsd,
-		getAPIHandlers: gah,
-		listComponents: lc,
+		searchCode:         sc,
+		readFile:           rf,
+		findSymbol:         fs,
+		findCallers:        fc,
+		listEndpoints:      le,
+		getFileSymbols:     gfs,
+		listServices:       ls,
+		getServiceDeps:     gsd,
+		getAPIHandlers:     gah,
+		listComponents:     lc,
+		indexRepo:          ir,
+		generateEmbeddings: ge,
+		buildGraph:         bg,
 	}
 }
 
@@ -179,6 +188,44 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		kind := req.GetString("kind", "")
 		limit := req.GetInt("limit", 100)
 		result, err := h.listComponents.Execute(ctx, kind, limit)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Admin tools ---
+
+	srv.AddTool(mcp.NewTool("index_repository",
+		mcp.WithDescription("Index or re-index a Go/TypeScript repository. Parses AST to extract symbols (functions, types, methods, interfaces) and API endpoints."),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Absolute path to the repository to index")),
+		mcp.WithBoolean("force", mcp.Description("Force re-index all files, even if unchanged (default: false)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		path := req.GetString("path", "")
+		force := req.GetBool("force", false)
+		result, err := h.indexRepo.Execute(ctx, path, force)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("generate_embeddings",
+		mcp.WithDescription("Generate Gemini vector embeddings for all indexed symbols and store in Qdrant for semantic search. Requires GEMINI_API_KEY."),
+		mcp.WithBoolean("force", mcp.Description("Re-embed all symbols, including already-embedded ones (default: false)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		force := req.GetBool("force", false)
+		result, err := h.generateEmbeddings.Execute(ctx, force)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("build_graph",
+		mcp.WithDescription("Build the Neo4j knowledge graph from indexed data. Creates package, file, function, and type nodes with their relationships."),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := h.buildGraph.Execute(ctx)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

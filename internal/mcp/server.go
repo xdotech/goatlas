@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"github.com/goatlas/goatlas/internal/config"
 	"github.com/goatlas/goatlas/internal/graph"
 	"github.com/goatlas/goatlas/internal/indexer"
 	"github.com/goatlas/goatlas/internal/mcp/handler"
@@ -17,11 +18,12 @@ type Server struct {
 
 // ServerConfig holds all dependencies for the MCP server.
 type ServerConfig struct {
+	Config      *config.Config
 	RepoRoot    string
 	IndexerSvc  *indexer.Service
 	Pool        *pgxpool.Pool
 	Searcher    *vector.Searcher // nil if vector search disabled
-	GraphClient *graph.Client   // nil if graph disabled
+	GraphClient *graph.Client    // nil if graph disabled
 }
 
 // NewServer wires all use cases and registers tools with the MCP server.
@@ -44,6 +46,9 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewGetServiceDepsUseCase(querier),
 		usecase.NewGetAPIHandlersUseCase(querier),
 		usecase.NewListComponentsUseCase(cfg.IndexerSvc.SymbolRepo),
+		usecase.NewIndexRepoUseCase(cfg.IndexerSvc),
+		usecase.NewGenerateEmbeddingsUseCase(cfg.Pool, cfg.Config.QdrantURL, cfg.Config.GeminiAPIKey),
+		usecase.NewBuildGraphUseCase(cfg.GraphClient, cfg.Pool),
 	)
 	h.RegisterTools(mcpSrv)
 
@@ -54,3 +59,4 @@ func NewServer(cfg ServerConfig) *Server {
 func (s *Server) RunStdio() error {
 	return mcpgo.ServeStdio(s.mcpServer)
 }
+

@@ -1,4 +1,4 @@
-.PHONY: build test lint docker-up docker-down migrate run-index clean
+.PHONY: build test lint docker-up docker-down migrate run-index serve clean
 
 BINARY=goatlas
 
@@ -25,3 +25,6 @@ run-index:
 
 clean:
 	rm -f $(BINARY)
+
+serve:
+	go run . serve
