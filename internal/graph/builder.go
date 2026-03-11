@@ -27,6 +27,9 @@ type BuildResult struct {
 	ImportEdges     int
 	ServiceNodes    int
 	ConnectionEdges int
+	ComponentEdges  int
+	CallEdges       int
+	TypeFlowEdges   int
 }
 
 // Build populates the Neo4j graph from the PostgreSQL index.
@@ -47,6 +50,15 @@ func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	}
 	if err := b.buildServiceConnections(ctx, result); err != nil {
 		return nil, fmt.Errorf("build service connections: %w", err)
+	}
+	if err := b.buildComponentAPIEdges(ctx, result); err != nil {
+		return nil, fmt.Errorf("build component API edges: %w", err)
+	}
+	if err := b.buildCallEdges(ctx, result); err != nil {
+		return nil, fmt.Errorf("build call edges: %w", err)
+	}
+	if err := b.buildTypeFlowEdges(ctx, result); err != nil {
+		return nil, fmt.Errorf("build type flow edges: %w", err)
 	}
 
 	return result, nil
@@ -280,3 +292,133 @@ func (b *Builder) buildServiceConnections(ctx context.Context, result *BuildResu
 	return rows.Err()
 }
 
+// buildComponentAPIEdges creates Component nodes and CALLS_API edges
+// from the component_api_calls table.
+func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResult) error {
+	rows, err := b.pool.Query(ctx, `
+		SELECT c.component, c.http_method, c.api_path, c.target_service, f.path
+		FROM component_api_calls c
+		JOIN files f ON c.file_id = f.id
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var component, method, apiPath, targetService, filePath string
+		if err := rows.Scan(&component, &method, &apiPath, &targetService, &filePath); err != nil {
+			return err
+		}
+
+		cypher := `
+			MERGE (comp:Component {name: $component, file: $file})
+			MERGE (ep:Endpoint {path: $api_path})
+			MERGE (comp)-[:CALLS_API {method: $method, service: $service}]->(ep)
+		`
+		params := map[string]any{
+			"component": component,
+			"file":      filePath,
+			"api_path":  apiPath,
+			"method":    method,
+			"service":   targetService,
+		}
+		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+			return err
+		}
+		result.ComponentEdges++
+	}
+	return rows.Err()
+}
+
+// buildCallEdges creates CALLS edges between Function nodes
+// from the function_calls table.
+func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
+	rows, err := b.pool.Query(ctx, `
+		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line
+		FROM function_calls fc
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var callerQName, calleeName, calleePkg string
+		var line int
+		if err := rows.Scan(&callerQName, &calleeName, &calleePkg, &line); err != nil {
+			return err
+		}
+
+		// Build a callee qualified name for matching
+		calleeQualified := calleePkg + "." + calleeName
+
+		cypher := `
+			MATCH (caller:Function {qualified: $caller})
+			MATCH (callee:Function)
+			WHERE callee.qualified = $callee_qualified
+			   OR (callee.name = $callee_name AND callee.qualified CONTAINS $callee_pkg)
+			MERGE (caller)-[:CALLS {line: $line}]->(callee)
+		`
+		params := map[string]any{
+			"caller":           callerQName,
+			"callee_qualified": calleeQualified,
+			"callee_name":      calleeName,
+			"callee_pkg":       calleePkg,
+			"line":             line,
+		}
+		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+			return err
+		}
+		result.CallEdges++
+	}
+	return rows.Err()
+}
+
+// buildTypeFlowEdges creates ACCEPTS and RETURNS edges between Function and Type nodes
+// from the type_usages table.
+func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) error {
+	rows, err := b.pool.Query(ctx, `
+		SELECT tu.symbol_name, tu.type_name, tu.direction, tu.position
+		FROM type_usages tu
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var symbolName, typeName, direction string
+		var position int
+		if err := rows.Scan(&symbolName, &typeName, &direction, &position); err != nil {
+			return err
+		}
+
+		var edgeType string
+		switch direction {
+		case "input":
+			edgeType = "ACCEPTS"
+		case "output":
+			edgeType = "RETURNS"
+		default:
+			continue
+		}
+
+		cypher := fmt.Sprintf(`
+			MATCH (fn:Function)
+			WHERE fn.qualified = $symbol OR fn.name = $symbol
+			MERGE (t:Type {name: $type_name})
+			MERGE (fn)-[:%s {pos: $pos}]->(t)
+		`, edgeType)
+		params := map[string]any{
+			"symbol":    symbolName,
+			"type_name": typeName,
+			"pos":       position,
+		}
+		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+			return err
+		}
+		result.TypeFlowEdges++
+	}
+	return rows.Err()
+}

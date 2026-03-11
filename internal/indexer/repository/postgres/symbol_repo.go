@@ -104,6 +104,52 @@ func (r *SymbolRepo) ListByKinds(ctx context.Context, kinds []string, limit int)
 	return scanSymbols(rows)
 }
 
+// SearchWithFile performs full-text search and returns symbols with their file paths.
+func (r *SymbolRepo) SearchWithFile(ctx context.Context, query string, limit int, kind string) ([]domain.SymbolWithFile, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var rows pgx.Rows
+	var err error
+	if kind != "" {
+		rows, err = r.pool.Query(ctx, `
+			SELECT s.id, s.file_id, s.kind, s.name, s.qualified_name, s.signature, s.receiver, s.line, s.col, s.doc_comment, f.path
+			FROM symbols s
+			JOIN files f ON s.file_id = f.id
+			WHERE s.search_vector @@ plainto_tsquery('english', $1) AND s.kind = $3
+			ORDER BY ts_rank(s.search_vector, plainto_tsquery('english', $1)) DESC
+			LIMIT $2
+		`, query, limit, kind)
+	} else {
+		rows, err = r.pool.Query(ctx, `
+			SELECT s.id, s.file_id, s.kind, s.name, s.qualified_name, s.signature, s.receiver, s.line, s.col, s.doc_comment, f.path
+			FROM symbols s
+			JOIN files f ON s.file_id = f.id
+			WHERE s.search_vector @@ plainto_tsquery('english', $1)
+			ORDER BY ts_rank(s.search_vector, plainto_tsquery('english', $1)) DESC
+			LIMIT $2
+		`, query, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []domain.SymbolWithFile
+	for rows.Next() {
+		var sw domain.SymbolWithFile
+		if err := rows.Scan(
+			&sw.ID, &sw.FileID, &sw.Kind, &sw.Name, &sw.QualifiedName,
+			&sw.Signature, &sw.Receiver, &sw.Line, &sw.Col, &sw.DocComment,
+			&sw.FilePath,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, sw)
+	}
+	return results, rows.Err()
+}
+
 func scanSymbols(rows pgx.Rows) ([]domain.Symbol, error) {
 	var symbols []domain.Symbol
 	for rows.Next() {

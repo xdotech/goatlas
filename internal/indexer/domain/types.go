@@ -38,6 +38,12 @@ type Symbol struct {
 	DocComment    string
 }
 
+// SymbolWithFile extends Symbol with file path for snippet extraction.
+type SymbolWithFile struct {
+	Symbol
+	FilePath string // relative path from repo root
+}
+
 // APIEndpoint represents an HTTP route detected in source code.
 type APIEndpoint struct {
 	ID          int64
@@ -86,6 +92,7 @@ type SymbolRepository interface {
 	BulkInsert(ctx context.Context, symbols []Symbol) error
 	DeleteByFileID(ctx context.Context, fileID int64) error
 	Search(ctx context.Context, query string, limit int, kind string) ([]Symbol, error)
+	SearchWithFile(ctx context.Context, query string, limit int, kind string) ([]SymbolWithFile, error)
 	GetByFile(ctx context.Context, fileID int64) ([]Symbol, error)
 	ListByKinds(ctx context.Context, kinds []string, limit int) ([]Symbol, error)
 }

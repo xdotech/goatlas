@@ -36,9 +36,9 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 
 	h := handler.NewMCPHandler(
-		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher),
+		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher, cfg.RepoRoot),
 		usecase.NewReadFileUseCase(cfg.RepoRoot),
-		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo),
+		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo, cfg.RepoRoot),
 		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo),
 		usecase.NewListEndpointsUseCase(cfg.IndexerSvc.EndpointRepo),
 		usecase.NewGetFileSymbolsUseCase(cfg.Pool, cfg.IndexerSvc.SymbolRepo),
@@ -49,6 +49,10 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewIndexRepoUseCase(cfg.IndexerSvc),
 		usecase.NewGenerateEmbeddingsUseCase(cfg.Pool, cfg.Config.QdrantURL, cfg.Config.GeminiAPIKey),
 		usecase.NewBuildGraphUseCase(cfg.GraphClient, cfg.Pool),
+		usecase.NewGetComponentAPIsUseCase(cfg.IndexerSvc.CACRepo),
+		usecase.NewGetAPIConsumersUseCase(cfg.IndexerSvc.CACRepo),
+		usecase.NewAnalyzeImpactUseCase(querier),
+		usecase.NewTraceTypeFlowUseCase(cfg.IndexerSvc.TURepo, querier),
 	)
 	h.RegisterTools(mcpSrv)
 

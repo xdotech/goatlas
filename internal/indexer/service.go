@@ -17,6 +17,9 @@ type Service struct {
 	EndpointRepo  domain.EndpointRepository
 	ImportRepo    domain.ImportRepository
 	ConnRepo      domain.ServiceConnectionRepository
+	CACRepo       domain.ComponentAPICallRepository
+	FCRepo        domain.FunctionCallRepository
+	TURepo        domain.TypeUsageRepository
 }
 
 // NewService constructs a Service using the provided database pool.
@@ -27,6 +30,9 @@ func NewService(pool *pgxpool.Pool) *Service {
 	endpointRepo := postgres.NewEndpointRepo(pool)
 	importRepo := postgres.NewImportRepo(pool)
 	connRepo := postgres.NewServiceConnectionRepo(pool)
+	cacRepo := postgres.NewComponentAPICallRepo(pool)
+	fcRepo := postgres.NewFunctionCallRepo(pool)
+	tuRepo := postgres.NewTypeUsageRepo(pool)
 
 	return &Service{
 		RepoRepo:      repoRepo,
@@ -35,7 +41,10 @@ func NewService(pool *pgxpool.Pool) *Service {
 		EndpointRepo:  endpointRepo,
 		ImportRepo:    importRepo,
 		ConnRepo:      connRepo,
-		IndexRepo:     usecase.NewIndexRepoUseCase(repoRepo, fileRepo, symbolRepo, endpointRepo, importRepo, connRepo),
+		CACRepo:       cacRepo,
+		FCRepo:        fcRepo,
+		TURepo:        tuRepo,
+		IndexRepo:     usecase.NewIndexRepoUseCase(repoRepo, fileRepo, symbolRepo, endpointRepo, importRepo, connRepo, cacRepo, fcRepo, tuRepo),
 		SearchSymbols: usecase.NewSearchSymbolsUseCase(symbolRepo),
 	}
 }

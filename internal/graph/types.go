@@ -51,3 +51,16 @@ type CallerResult struct {
 	Line          int
 	Depth         int
 }
+
+// AffectedEndpoint represents an API endpoint affected by a code change.
+type AffectedEndpoint struct {
+	Method string
+	Path   string
+}
+
+// ImpactReport is the result of a change impact analysis.
+type ImpactReport struct {
+	Callers              []CallerResult
+	AffectedEndpoints    []AffectedEndpoint
+	AffectedComponents   []string
+}

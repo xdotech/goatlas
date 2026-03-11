@@ -23,6 +23,10 @@ type MCPHandler struct {
 	indexRepo          *usecase.IndexRepoUseCase
 	generateEmbeddings *usecase.GenerateEmbeddingsUseCase
 	buildGraph         *usecase.BuildGraphUseCase
+	getComponentAPIs   *usecase.GetComponentAPIsUseCase
+	getAPIConsumers    *usecase.GetAPIConsumersUseCase
+	analyzeImpact      *usecase.AnalyzeImpactUseCase
+	traceTypeFlow      *usecase.TraceTypeFlowUseCase
 }
 
 // NewMCPHandler constructs an MCPHandler with all use cases.
@@ -40,6 +44,10 @@ func NewMCPHandler(
 	ir *usecase.IndexRepoUseCase,
 	ge *usecase.GenerateEmbeddingsUseCase,
 	bg *usecase.BuildGraphUseCase,
+	gca *usecase.GetComponentAPIsUseCase,
+	gac *usecase.GetAPIConsumersUseCase,
+	ai *usecase.AnalyzeImpactUseCase,
+	ttf *usecase.TraceTypeFlowUseCase,
 ) *MCPHandler {
 	return &MCPHandler{
 		searchCode:         sc,
@@ -55,6 +63,10 @@ func NewMCPHandler(
 		indexRepo:          ir,
 		generateEmbeddings: ge,
 		buildGraph:         bg,
+		getComponentAPIs:   gca,
+		getAPIConsumers:    gac,
+		analyzeImpact:      ai,
+		traceTypeFlow:      ttf,
 	}
 }
 
@@ -226,6 +238,66 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		mcp.WithDescription("Build the Neo4j knowledge graph from indexed data. Creates package, file, function, and type nodes with their relationships."),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		result, err := h.buildGraph.Execute(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Phase 1: Frontend ↔ Backend Cross-Reference ---
+
+	srv.AddTool(mcp.NewTool("get_component_apis",
+		mcp.WithDescription("Get API endpoints called by a React/TS component. Maps frontend components to backend APIs."),
+		mcp.WithString("component", mcp.Required(), mcp.Description("React component name to look up")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		component := req.GetString("component", "")
+		result, err := h.getComponentAPIs.Execute(ctx, component)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("get_api_consumers",
+		mcp.WithDescription("Find UI components that call a given API endpoint. Reverse lookup from backend API to frontend consumers."),
+		mcp.WithString("api_path", mcp.Required(), mcp.Description("API path pattern to search for")),
+		mcp.WithString("method", mcp.Description("Filter by HTTP method: GET|POST|PUT|DELETE (optional)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		apiPath := req.GetString("api_path", "")
+		method := req.GetString("method", "")
+		result, err := h.getAPIConsumers.Execute(ctx, apiPath, method)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Phase 2: Change Impact Analysis ---
+
+	srv.AddTool(mcp.NewTool("analyze_impact",
+		mcp.WithDescription("Analyze change impact: when modifying a function, find all affected callers, API endpoints, and UI components. Uses recursive call graph traversal."),
+		mcp.WithString("symbol", mcp.Required(), mcp.Description("Function or method name to analyze impact for")),
+		mcp.WithNumber("max_depth", mcp.Description("Maximum call graph depth to traverse (default: 5)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		symbol := req.GetString("symbol", "")
+		maxDepth := int(req.GetFloat("max_depth", 5))
+		result, err := h.analyzeImpact.Execute(ctx, symbol, maxDepth)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Phase 3: Type Flow Tracking ---
+
+	srv.AddTool(mcp.NewTool("trace_type_flow",
+		mcp.WithDescription("Trace how a data type flows through the codebase: which functions produce (return) and consume (accept) it. Maps the full data flow chain from API handler to repository."),
+		mcp.WithString("type_name", mcp.Required(), mcp.Description("Type name to trace (e.g. 'CreateOrderRequest')")),
+		mcp.WithString("direction", mcp.Description("Flow direction: upstream (producers) | downstream (consumers) | both (default)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		typeName := req.GetString("type_name", "")
+		direction := req.GetString("direction", "both")
+		result, err := h.traceTypeFlow.Execute(ctx, typeName, direction)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

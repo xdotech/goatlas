@@ -23,6 +23,9 @@ type IndexRepoUseCase struct {
 	epRepo     domain.EndpointRepository
 	importRepo domain.ImportRepository
 	connRepo   domain.ServiceConnectionRepository
+	cacRepo    domain.ComponentAPICallRepository
+	fcRepo     domain.FunctionCallRepository
+	tuRepo     domain.TypeUsageRepository
 }
 
 // NewIndexRepoUseCase constructs a new IndexRepoUseCase.
@@ -33,6 +36,9 @@ func NewIndexRepoUseCase(
 	epRepo domain.EndpointRepository,
 	importRepo domain.ImportRepository,
 	connRepo domain.ServiceConnectionRepository,
+	cacRepo domain.ComponentAPICallRepository,
+	fcRepo domain.FunctionCallRepository,
+	tuRepo domain.TypeUsageRepository,
 ) *IndexRepoUseCase {
 	return &IndexRepoUseCase{
 		repoRepo:   repoRepo,
@@ -41,6 +47,9 @@ func NewIndexRepoUseCase(
 		epRepo:     epRepo,
 		importRepo: importRepo,
 		connRepo:   connRepo,
+		cacRepo:    cacRepo,
+		fcRepo:     fcRepo,
+		tuRepo:     tuRepo,
 	}
 }
 
@@ -234,6 +243,32 @@ func (uc *IndexRepoUseCase) indexGoFile(
 		*allConns = append(*allConns, connResult.Connections...)
 	}
 
+	// Extract function call graph
+	_ = uc.fcRepo.DeleteByFileID(ctx, fileRec.ID)
+	calls, callErr := parser.ExtractFunctionCalls(fullPath)
+	if callErr == nil && len(calls) > 0 {
+		for i := range calls {
+			calls[i].FileID = fileRec.ID
+		}
+		if err := uc.fcRepo.BulkInsert(ctx, calls); err != nil {
+			slog.Warn("insert function calls failed", "file", relPath, "error", err)
+		}
+		stats["function_calls"] += len(calls)
+	}
+
+	// Extract type usages from function signatures
+	_ = uc.tuRepo.DeleteByFileID(ctx, fileRec.ID)
+	typeUsages, tuErr := parser.ExtractTypeUsages(fullPath)
+	if tuErr == nil && len(typeUsages) > 0 {
+		for i := range typeUsages {
+			typeUsages[i].FileID = fileRec.ID
+		}
+		if err := uc.tuRepo.BulkInsert(ctx, typeUsages); err != nil {
+			slog.Warn("insert type usages failed", "file", relPath, "error", err)
+		}
+		stats["type_usages"] += len(typeUsages)
+	}
+
 	stats["files_indexed"]++
 	return nil
 }
@@ -322,6 +357,22 @@ func (uc *IndexRepoUseCase) indexJSFile(
 				tsConns[i].FileID = fileRec.ID
 			}
 			*allConns = append(*allConns, tsConns...)
+		}
+	}
+
+	// Detect component-level API calls (React component → backend API)
+	var apiPatterns []parser.TSAPIPattern
+	if patternCfg != nil {
+		apiPatterns = patternCfg.TypeScript.APIPrefix
+	}
+	_ = uc.cacRepo.DeleteByFileID(ctx, fileRec.ID)
+	componentCalls, _ := parser.DetectComponentAPICalls(fullPath, apiPatterns)
+	if len(componentCalls) > 0 {
+		for i := range componentCalls {
+			componentCalls[i].FileID = fileRec.ID
+		}
+		if err := uc.cacRepo.BulkInsert(ctx, componentCalls); err != nil {
+			return fmt.Errorf("insert component API calls: %w", err)
 		}
 	}
 
