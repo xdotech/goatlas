@@ -4,3 +4,4 @@
 /goatlas-*
 vendor/
 .DS_Store
+.claude/
