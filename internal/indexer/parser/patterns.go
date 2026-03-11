@@ -50,14 +50,14 @@ type TSAPIPattern struct {
 
 // LoadPatterns loads detection patterns with the following priority:
 //  1. {repoPath}/goatlas.yaml           (per-repo override)
-//  2. ~/.config/goatlas/goatlas.yaml     (global user config)
+//  2. ~/.goatlas/goatlas.yaml             (global user config)
 //  3. Embedded default_patterns.yaml     (fallback)
 func LoadPatterns(repoPath string) (*PatternConfig, error) {
 	data := defaultPatternsYAML
 
 	// Priority 2: global config
 	if home, err := os.UserHomeDir(); err == nil {
-		globalPath := filepath.Join(home, ".config", "goatlas", "goatlas.yaml")
+		globalPath := filepath.Join(home, ".goatlas", "goatlas.yaml")
 		if fileData, err := os.ReadFile(globalPath); err == nil {
 			data = fileData
 		}
