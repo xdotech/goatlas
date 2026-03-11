@@ -335,7 +335,7 @@ func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResul
 // from the function_calls table.
 func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line
+		SELECT fc.caller_qualified, fc.callee_name, fc.callee_qualified, fc.line
 		FROM function_calls fc
 	`)
 	if err != nil {
@@ -344,27 +344,29 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 	defer rows.Close()
 
 	for rows.Next() {
-		var callerQName, calleeName, calleePkg string
+		var callerQName, calleeName string
+		var calleeQualified *string
 		var line int
-		if err := rows.Scan(&callerQName, &calleeName, &calleePkg, &line); err != nil {
+		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line); err != nil {
 			return err
 		}
 
-		// Build a callee qualified name for matching
-		calleeQualified := calleePkg + "." + calleeName
+		cq := ""
+		if calleeQualified != nil {
+			cq = *calleeQualified
+		}
 
 		cypher := `
 			MATCH (caller:Function {qualified: $caller})
 			MATCH (callee:Function)
 			WHERE callee.qualified = $callee_qualified
-			   OR (callee.name = $callee_name AND callee.qualified CONTAINS $callee_pkg)
+			   OR callee.name = $callee_name
 			MERGE (caller)-[:CALLS {line: $line}]->(callee)
 		`
 		params := map[string]any{
 			"caller":           callerQName,
-			"callee_qualified": calleeQualified,
+			"callee_qualified": cq,
 			"callee_name":      calleeName,
-			"callee_pkg":       calleePkg,
 			"line":             line,
 		}
 		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
@@ -373,6 +375,7 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 		result.CallEdges++
 	}
 	return rows.Err()
+
 }
 
 // buildTypeFlowEdges creates ACCEPTS and RETURNS edges between Function and Type nodes
