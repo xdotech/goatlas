@@ -262,6 +262,12 @@ func (b *Builder) buildServiceConnections(ctx context.Context, result *BuildResu
 				MERGE (topic:Topic {name: $target})
 				MERGE (src)-[:SUBSCRIBES {line: $line}]->(topic)
 			`
+		case "http_api":
+			cypher = `
+				MERGE (src:Service {name: $source})
+				MERGE (tgt:Service {name: $target})
+				MERGE (src)-[:CALLS_API {line: $line}]->(tgt)
+			`
 		default:
 			continue
 		}

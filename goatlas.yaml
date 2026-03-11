@@ -1,0 +1,36 @@
+# GoAtlas detection patterns configuration
+# This file defines how GoAtlas detects cross-service connections during indexing.
+# Modify these patterns to match your project's conventions.
+
+# Go AST-based detection patterns
+go:
+  grpc:
+    - package_suffix: "grpcx"
+      function: "NewClientManager"
+      target_arg: 1          # 0-indexed: second arg is the pb.NewXXXClient builder
+      conn_type: "grpc"
+
+  kafka_consumer:
+    - package_contains: "queue/kafka"
+      functions:
+        - "MustNewListener"
+        - "NewQueue"
+      target_arg: 0
+      conn_type: "kafka_consume"
+
+  kafka_producer:
+    - package_suffix: "/queue"
+      functions:
+        - "Must"
+        - "New"
+      target_arg: 0
+      conn_type: "kafka_publish"
+
+# TypeScript/JavaScript detection patterns (regex-based, no AST needed)
+typescript:
+  # Detect backend service references from SVC_PREFIX constants
+  # e.g. const TO_SVC_PREFIX = 'wms-transfer-order-svc/api/v1';
+  api_prefix:
+    - pattern: "=\\s*['\"`]([a-zA-Z0-9_-]+-svc)/api/"
+      conn_type: "http_api"
+      file_glob: "*.api.ts"

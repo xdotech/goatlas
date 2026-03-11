@@ -1,0 +1,22 @@
+# Default detection patterns (embedded fallback)
+go:
+  grpc:
+    - package_suffix: "grpcx"
+      function: "NewClientManager"
+      target_arg: 1
+      conn_type: "grpc"
+  kafka_consumer:
+    - package_contains: "queue/kafka"
+      functions: ["MustNewListener", "NewQueue"]
+      target_arg: 0
+      conn_type: "kafka_consume"
+  kafka_producer:
+    - package_suffix: "/queue"
+      functions: ["Must", "New"]
+      target_arg: 0
+      conn_type: "kafka_publish"
+typescript:
+  api_prefix:
+    - pattern: "=\\s*['\"`]([a-zA-Z0-9_-]+-svc)/api/"
+      conn_type: "http_api"
+      file_glob: "*.api.ts"

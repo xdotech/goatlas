@@ -15,11 +15,13 @@ type ConnectionResult struct {
 	Connections []domain.ServiceConnection
 }
 
-// DetectConnections parses a Go file and detects cross-service connections:
-// - gRPC clients via grpcx.NewClientManager calls
-// - Kafka consumers via kafka.MustNewListener / kafka.NewQueue calls
-// - Kafka producers via queue.Must / queue.New calls
-func DetectConnections(filePath string) (*ConnectionResult, error) {
+// DetectConnections parses a Go file and detects cross-service connections
+// using patterns from the config. If cfg is nil, returns empty result.
+func DetectConnections(filePath string, cfg *PatternConfig) (*ConnectionResult, error) {
+	if cfg == nil {
+		return &ConnectionResult{}, nil
+	}
+
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
 	if err != nil {
@@ -35,7 +37,6 @@ func DetectConnections(filePath string) (*ConnectionResult, error) {
 		if imp.Name != nil {
 			importAliases[imp.Name.Name] = importPath
 		} else {
-			// Use last segment of import path as default alias
 			parts := strings.Split(importPath, "/")
 			importAliases[parts[len(parts)-1]] = importPath
 		}
@@ -47,19 +48,28 @@ func DetectConnections(filePath string) (*ConnectionResult, error) {
 			return true
 		}
 
-		// Detect gRPC: grpcx.NewClientManager(conf, pb.NewXXXClient)
-		if conn := detectGRPCClient(call, fset, importAliases); conn != nil {
-			result.Connections = append(result.Connections, *conn)
+		// Check gRPC patterns
+		for _, p := range cfg.Go.GRPC {
+			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
+				result.Connections = append(result.Connections, *conn)
+				break
+			}
 		}
 
-		// Detect Kafka consumer: kafka.MustNewListener(cfg, handler) or kafka.NewQueue(cfg, handler)
-		if conn := detectKafkaConsumer(call, fset, importAliases); conn != nil {
-			result.Connections = append(result.Connections, *conn)
+		// Check Kafka consumer patterns
+		for _, p := range cfg.Go.KafkaConsumer {
+			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
+				result.Connections = append(result.Connections, *conn)
+				break
+			}
 		}
 
-		// Detect Kafka producer: queue.Must(cfg) or queue.New(cfg)
-		if conn := detectKafkaProducer(call, fset, importAliases); conn != nil {
-			result.Connections = append(result.Connections, *conn)
+		// Check Kafka producer patterns
+		for _, p := range cfg.Go.KafkaProducer {
+			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
+				result.Connections = append(result.Connections, *conn)
+				break
+			}
 		}
 
 		return true
@@ -68,9 +78,8 @@ func DetectConnections(filePath string) (*ConnectionResult, error) {
 	return result, nil
 }
 
-// detectGRPCClient detects grpcx.NewClientManager(conf, pb.NewXXXClient) pattern.
-// Extracts the second argument (builder function) to identify the target service.
-func detectGRPCClient(call *ast.CallExpr, fset *token.FileSet, imports map[string]string) *domain.ServiceConnection {
+// matchGoCall checks if a function call matches a GoCallPattern from the config.
+func matchGoCall(call *ast.CallExpr, fset *token.FileSet, imports map[string]string, pattern GoCallPattern) *domain.ServiceConnection {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return nil
@@ -81,108 +90,50 @@ func detectGRPCClient(call *ast.CallExpr, fset *token.FileSet, imports map[strin
 		return nil
 	}
 
-	// Check for grpcx.NewClientManager
-	importPath, hasImport := imports[ident.Name]
-	if !hasImport || !strings.HasSuffix(importPath, "grpcx") {
-		return nil
-	}
-	if sel.Sel.Name != "NewClientManager" {
-		return nil
-	}
-
-	// Extract builder function from second argument (e.g., transferorderpb.NewTransferOrderClient)
-	target := "unknown"
-	if len(call.Args) >= 2 {
-		target = connExprToString(call.Args[1])
-	}
-
-	pos := fset.Position(call.Pos())
-	return &domain.ServiceConnection{
-		ConnType: "grpc",
-		Target:   target,
-		Line:     pos.Line,
-	}
-}
-
-// detectKafkaConsumer detects kafka.MustNewListener or kafka.NewQueue patterns.
-func detectKafkaConsumer(call *ast.CallExpr, fset *token.FileSet, imports map[string]string) *domain.ServiceConnection {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil
-	}
-
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return nil
-	}
-
+	// Check import path matches
 	importPath, hasImport := imports[ident.Name]
 	if !hasImport {
 		return nil
 	}
 
-	// Check for kafka.MustNewListener or kafka.NewQueue
-	isKafkaConsumer := strings.Contains(importPath, "queue/kafka") &&
-		(sel.Sel.Name == "MustNewListener" || sel.Sel.Name == "NewQueue")
-
-	if !isKafkaConsumer {
+	if pattern.PackageSuffix != "" && !strings.HasSuffix(importPath, pattern.PackageSuffix) {
+		return nil
+	}
+	if pattern.PackageContains != "" && !strings.Contains(importPath, pattern.PackageContains) {
 		return nil
 	}
 
-	// Extract topic info from first argument if possible
-	target := "kafka_consumer"
-	if len(call.Args) >= 1 {
-		target = "kafka_consumer:" + connExprToString(call.Args[0])
+	// Check function name matches
+	fnName := sel.Sel.Name
+	matched := false
+	if pattern.Function != "" && fnName == pattern.Function {
+		matched = true
+	}
+	for _, fn := range pattern.Functions {
+		if fnName == fn {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil
+	}
+
+	// Extract target from specified argument
+	target := pattern.ConnType
+	if pattern.TargetArg < len(call.Args) {
+		target = connExprToString(call.Args[pattern.TargetArg])
 	}
 
 	pos := fset.Position(call.Pos())
 	return &domain.ServiceConnection{
-		ConnType: "kafka_consume",
+		ConnType: pattern.ConnType,
 		Target:   target,
 		Line:     pos.Line,
 	}
 }
 
-// detectKafkaProducer detects queue.Must or queue.New patterns.
-func detectKafkaProducer(call *ast.CallExpr, fset *token.FileSet, imports map[string]string) *domain.ServiceConnection {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil
-	}
-
-	ident, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return nil
-	}
-
-	importPath, hasImport := imports[ident.Name]
-	if !hasImport {
-		return nil
-	}
-
-	// Check for queue.Must or queue.New (the producer factory functions)
-	isProducer := strings.HasSuffix(importPath, "/queue") &&
-		(sel.Sel.Name == "Must" || sel.Sel.Name == "New")
-
-	if !isProducer {
-		return nil
-	}
-
-	target := "kafka_producer"
-	if len(call.Args) >= 1 {
-		target = "kafka_producer:" + connExprToString(call.Args[0])
-	}
-
-	pos := fset.Position(call.Pos())
-	return &domain.ServiceConnection{
-		ConnType: "kafka_publish",
-		Target:   target,
-		Line:     pos.Line,
-	}
-}
-
-// connExprToString converts an AST expression to a readable string, used to extract
-// function names and identifiers from call arguments.
+// connExprToString converts an AST expression to a readable string.
 func connExprToString(expr ast.Expr) string {
 	switch e := expr.(type) {
 	case *ast.Ident:

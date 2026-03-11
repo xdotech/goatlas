@@ -54,6 +54,9 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 	repoName := filepath.Base(absPath)
 	modulePath := parser.ModuleFromGoMod(absPath)
 
+	// Load detection patterns from goatlas.yaml (or embedded defaults)
+	patternCfg, _ := parser.LoadPatterns(absPath)
+
 	// Upsert the repository record
 	repo := &domain.Repository{
 		Name: repoName,
@@ -98,9 +101,9 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 
 		switch ext {
 		case ".go":
-			return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns)
+			return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns, patternCfg)
 		case ".tsx", ".ts", ".jsx", ".js":
-			return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats)
+			return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats, &allConns, patternCfg)
 		default:
 			return nil
 		}
@@ -142,6 +145,7 @@ func (uc *IndexRepoUseCase) indexGoFile(
 	force bool,
 	stats map[string]int,
 	allConns *[]domain.ServiceConnection,
+	patternCfg *parser.PatternConfig,
 ) error {
 	fullPath := filepath.Join(absPath, relPath)
 
@@ -221,7 +225,7 @@ func (uc *IndexRepoUseCase) indexGoFile(
 	}
 
 	// Detect cross-service connections (gRPC, Kafka)
-	connResult, err := parser.DetectConnections(fullPath)
+	connResult, err := parser.DetectConnections(fullPath, patternCfg)
 	if err == nil && len(connResult.Connections) > 0 {
 		for i := range connResult.Connections {
 			connResult.Connections[i].RepoID = repoID
@@ -241,6 +245,8 @@ func (uc *IndexRepoUseCase) indexJSFile(
 	absPath, relPath string,
 	force bool,
 	stats map[string]int,
+	allConns *[]domain.ServiceConnection,
+	patternCfg *parser.PatternConfig,
 ) error {
 	fullPath := filepath.Join(absPath, relPath)
 
@@ -305,6 +311,18 @@ func (uc *IndexRepoUseCase) indexJSFile(
 			return fmt.Errorf("insert endpoints: %w", err)
 		}
 		stats["endpoints"] += len(endpoints)
+	}
+
+	// Detect API service references in TS files (e.g. SVC_PREFIX constants)
+	if patternCfg != nil && len(patternCfg.TypeScript.APIPrefix) > 0 {
+		tsConns, _ := parser.DetectTSAPIConnections(fullPath, patternCfg.TypeScript.APIPrefix)
+		if len(tsConns) > 0 {
+			for i := range tsConns {
+				tsConns[i].RepoID = repoID
+				tsConns[i].FileID = fileRec.ID
+			}
+			*allConns = append(*allConns, tsConns...)
+		}
 	}
 
 	stats["files_indexed"]++
