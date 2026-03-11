@@ -20,11 +20,13 @@ func NewBuilder(pool *pgxpool.Pool, client *Client) *Builder {
 
 // BuildResult holds counts of nodes and edges created.
 type BuildResult struct {
-	PackageNodes  int
-	FileNodes     int
-	FunctionNodes int
-	TypeNodes     int
-	ImportEdges   int
+	PackageNodes    int
+	FileNodes       int
+	FunctionNodes   int
+	TypeNodes       int
+	ImportEdges     int
+	ServiceNodes    int
+	ConnectionEdges int
 }
 
 // Build populates the Neo4j graph from the PostgreSQL index.
@@ -42,6 +44,9 @@ func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	}
 	if err := b.buildImportEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build import edges: %w", err)
+	}
+	if err := b.buildServiceConnections(ctx, result); err != nil {
+		return nil, fmt.Errorf("build service connections: %w", err)
 	}
 
 	return result, nil
@@ -198,3 +203,74 @@ func (b *Builder) buildImportEdges(ctx context.Context, result *BuildResult) err
 	}
 	return rows.Err()
 }
+
+func (b *Builder) buildServiceConnections(ctx context.Context, result *BuildResult) error {
+	rows, err := b.pool.Query(ctx, `
+		SELECT r.name, sc.conn_type, sc.target, sc.line, f.path
+		FROM service_connections sc
+		JOIN repositories r ON sc.repo_id = r.id
+		LEFT JOIN files f ON sc.file_id = f.id
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	services := map[string]struct{}{}
+	for rows.Next() {
+		var repoName, connType, target string
+		var line int
+		var filePath *string
+		if err := rows.Scan(&repoName, &connType, &target, &line, &filePath); err != nil {
+			return err
+		}
+
+		// Create Service node for the source repo
+		if _, exists := services[repoName]; !exists {
+			cypher := `MERGE (s:Service {name: $name})`
+			if err := b.client.RunCypher(ctx, cypher, map[string]any{"name": repoName}); err != nil {
+				return err
+			}
+			services[repoName] = struct{}{}
+			result.ServiceNodes++
+		}
+
+		// Create appropriate edge based on connection type
+		var cypher string
+		params := map[string]any{
+			"source": repoName,
+			"target": target,
+			"line":   line,
+		}
+
+		switch connType {
+		case "grpc":
+			cypher = `
+				MERGE (src:Service {name: $source})
+				MERGE (tgt:Service {name: $target})
+				MERGE (src)-[:CALLS_GRPC {target: $target, line: $line}]->(tgt)
+			`
+		case "kafka_publish":
+			cypher = `
+				MERGE (src:Service {name: $source})
+				MERGE (topic:Topic {name: $target})
+				MERGE (src)-[:PUBLISHES {line: $line}]->(topic)
+			`
+		case "kafka_consume":
+			cypher = `
+				MERGE (src:Service {name: $source})
+				MERGE (topic:Topic {name: $target})
+				MERGE (src)-[:SUBSCRIBES {line: $line}]->(topic)
+			`
+		default:
+			continue
+		}
+
+		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+			return err
+		}
+		result.ConnectionEdges++
+	}
+	return rows.Err()
+}
+

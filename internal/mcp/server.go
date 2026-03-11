@@ -41,7 +41,7 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo),
 		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo),
 		usecase.NewListEndpointsUseCase(cfg.IndexerSvc.EndpointRepo),
-		usecase.NewGetFileSymbolsUseCase(cfg.IndexerSvc.FileRepo, cfg.IndexerSvc.SymbolRepo),
+		usecase.NewGetFileSymbolsUseCase(cfg.Pool, cfg.IndexerSvc.SymbolRepo),
 		usecase.NewListServicesUseCase(cfg.Pool),
 		usecase.NewGetServiceDepsUseCase(querier),
 		usecase.NewGetAPIHandlersUseCase(querier),

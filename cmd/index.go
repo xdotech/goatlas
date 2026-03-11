@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/goatlas/goatlas/internal/config"
 	"github.com/goatlas/goatlas/internal/db"
@@ -40,11 +40,8 @@ var indexCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Indexing complete in %s\n", result.Duration.Round(time.Millisecond))
-		fmt.Printf("  Files indexed:   %d\n", result.FilesIndexed)
-		fmt.Printf("  Files skipped:   %d\n", result.FilesSkipped)
-		fmt.Printf("  Symbols found:   %d\n", result.SymbolsFound)
-		fmt.Printf("  Endpoints found: %d\n", result.EndpointsFound)
+		out, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(out))
 		return nil
 	},
 }

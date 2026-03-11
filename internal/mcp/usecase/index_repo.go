@@ -2,8 +2,8 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/goatlas/goatlas/internal/indexer"
 )
@@ -29,12 +29,7 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force 
 		return "", err
 	}
 
-	return fmt.Sprintf(
-		"Indexing complete in %s\n  Files indexed:   %d\n  Files skipped:   %d\n  Symbols found:   %d\n  Endpoints found: %d",
-		result.Duration.Round(time.Millisecond),
-		result.FilesIndexed,
-		result.FilesSkipped,
-		result.SymbolsFound,
-		result.EndpointsFound,
-	), nil
+	// result is map[string]any, format it as JSON for MCP output
+	out, _ := json.MarshalIndent(result, "", "  ")
+	return string(out), nil
 }

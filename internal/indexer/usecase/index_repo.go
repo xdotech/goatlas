@@ -3,189 +3,319 @@ package usecase
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/goatlas/goatlas/internal/indexer/domain"
 	"github.com/goatlas/goatlas/internal/indexer/parser"
 )
 
-// IndexResult holds statistics from a completed indexing run.
-type IndexResult struct {
-	FilesIndexed   int
-	FilesSkipped   int
-	SymbolsFound   int
-	EndpointsFound int
-	Duration       time.Duration
-}
-
-// IndexRepoUseCase walks a repository and indexes all Go source files.
+// IndexRepoUseCase indexes (or re-indexes) a repository.
 type IndexRepoUseCase struct {
-	fileRepo     domain.FileRepository
-	symbolRepo   domain.SymbolRepository
-	endpointRepo domain.EndpointRepository
-	importRepo   domain.ImportRepository
+	repoRepo   domain.RepositoryRepository
+	fileRepo   domain.FileRepository
+	symbolRepo domain.SymbolRepository
+	epRepo     domain.EndpointRepository
+	importRepo domain.ImportRepository
+	connRepo   domain.ServiceConnectionRepository
 }
 
-// NewIndexRepoUseCase creates a new IndexRepoUseCase with the given repositories.
-func NewIndexRepoUseCase(fr domain.FileRepository, sr domain.SymbolRepository, er domain.EndpointRepository, ir domain.ImportRepository) *IndexRepoUseCase {
-	return &IndexRepoUseCase{fileRepo: fr, symbolRepo: sr, endpointRepo: er, importRepo: ir}
+// NewIndexRepoUseCase constructs a new IndexRepoUseCase.
+func NewIndexRepoUseCase(
+	repoRepo domain.RepositoryRepository,
+	fileRepo domain.FileRepository,
+	symbolRepo domain.SymbolRepository,
+	epRepo domain.EndpointRepository,
+	importRepo domain.ImportRepository,
+	connRepo domain.ServiceConnectionRepository,
+) *IndexRepoUseCase {
+	return &IndexRepoUseCase{
+		repoRepo:   repoRepo,
+		fileRepo:   fileRepo,
+		symbolRepo: symbolRepo,
+		epRepo:     epRepo,
+		importRepo: importRepo,
+		connRepo:   connRepo,
+	}
 }
 
-var skipDirs = map[string]bool{
-	".git": true, "vendor": true, "node_modules": true, "testdata": true, ".idea": true,
-}
-
-// Execute walks repoPath and indexes every .go file. When force is false,
-// files whose hash hasn't changed are skipped.
-func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force bool) (*IndexResult, error) {
-	start := time.Now()
-	result := &IndexResult{}
-
-	absPath, err := filepath.Abs(repoPath)
+// Execute walks the repository at absPath, parses files, and stores results.
+func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force bool) (map[string]any, error) {
+	absPath, err := filepath.Abs(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve path: %w", err)
+		return nil, fmt.Errorf("abs path: %w", err)
 	}
 
-	if _, err := os.Stat(absPath); err != nil {
-		return nil, fmt.Errorf("repo path not found: %w", err)
+	repoName := filepath.Base(absPath)
+	modulePath := parser.ModuleFromGoMod(absPath)
+
+	// Upsert the repository record
+	repo := &domain.Repository{
+		Name: repoName,
+		Path: absPath,
+	}
+	if err := uc.repoRepo.Upsert(ctx, repo); err != nil {
+		return nil, fmt.Errorf("upsert repository: %w", err)
 	}
 
-	repo := filepath.Base(absPath)
+	slog.Info("indexing repository", "name", repoName, "id", repo.ID, "module", modulePath)
 
-	err = filepath.WalkDir(absPath, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil // skip unreadable entries
+	// Clear cross-service connections for this repo (re-detected each index)
+	if err := uc.connRepo.DeleteByRepoID(ctx, repo.ID); err != nil {
+		return nil, fmt.Errorf("clear connections: %w", err)
+	}
+
+	stats := map[string]int{
+		"files_indexed":  0,
+		"files_skipped":  0,
+		"symbols":        0,
+		"endpoints":      0,
+		"imports":        0,
+		"connections":    0,
+	}
+
+	var allConns []domain.ServiceConnection
+
+	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable
 		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
+		if info.IsDir() {
+			base := info.Name()
+			if base == "vendor" || base == "node_modules" || base == ".git" || base == "testdata" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !isIndexableFile(path) {
+
+		ext := strings.ToLower(filepath.Ext(path))
+		relPath, _ := filepath.Rel(absPath, path)
+
+		switch ext {
+		case ".go":
+			return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns)
+		case ".tsx", ".ts", ".jsx", ".js":
+			return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats)
+		default:
 			return nil
 		}
-		return uc.indexFile(ctx, repo, absPath, path, force, result)
 	})
+	if err != nil {
+		return nil, fmt.Errorf("walk: %w", err)
+	}
 
-	result.Duration = time.Since(start)
-	return result, err
+	// Bulk insert all detected connections
+	if len(allConns) > 0 {
+		if err := uc.connRepo.BulkInsert(ctx, allConns); err != nil {
+			return nil, fmt.Errorf("insert connections: %w", err)
+		}
+		stats["connections"] = len(allConns)
+	}
+
+	// Update repo last indexed time
+	now := time.Now()
+	repo.LastIndexedAt = &now
+	_ = uc.repoRepo.Upsert(ctx, repo)
+
+	result := map[string]any{
+		"status":     "ok",
+		"repository": repoName,
+		"repo_id":    repo.ID,
+		"module":     modulePath,
+	}
+	for k, v := range stats {
+		result[k] = v
+	}
+	return result, nil
 }
 
-func (uc *IndexRepoUseCase) indexFile(ctx context.Context, repo, repoPath, filePath string, force bool, result *IndexResult) error {
-	content, err := os.ReadFile(filePath)
+// indexGoFile processes a single Go file.
+func (uc *IndexRepoUseCase) indexGoFile(
+	ctx context.Context,
+	repoID int64,
+	absPath, relPath, modulePath string,
+	force bool,
+	stats map[string]int,
+	allConns *[]domain.ServiceConnection,
+) error {
+	fullPath := filepath.Join(absPath, relPath)
+
+	hash, err := hashFile(fullPath)
 	if err != nil {
-		return nil // skip unreadable files
-	}
-
-	hash := fmt.Sprintf("%x", sha256.Sum256(content))
-	relPath, _ := filepath.Rel(repoPath, filePath)
-
-	existing, err := uc.fileRepo.GetByPath(ctx, repo, relPath)
-	if err != nil {
-		return err
-	}
-
-	if existing != nil && existing.Hash == hash && !force {
-		result.FilesSkipped++
 		return nil
 	}
 
-	parsed, err := parseByExtension(filePath)
-	if err != nil {
-		return nil // skip unparseable files
+	// Check existing file: skip if hash unchanged
+	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
+	if existing != nil && existing.Hash == hash && !force {
+		stats["files_skipped"]++
+		return nil
 	}
 
-	endpoints, _ := extractEndpointsByExtension(filePath, parsed.Imports)
+	// Parse AST
+	parsed, err := parser.ParseFile(fullPath)
+	if err != nil {
+		slog.Warn("parse failed", "file", relPath, "error", err)
+		return nil
+	}
 
-	file := &domain.File{
-		Repo:   repo,
+	// Determine module for this file
+	pkgModule := modulePath
+	if pkgModule == "" {
+		pkgModule = parsed.Module
+	}
+
+	// Upsert file record
+	fileRec := &domain.File{
+		RepoID: repoID,
 		Path:   relPath,
-		Module: parsed.Module,
+		Module: pkgModule,
 		Hash:   hash,
 	}
-
-	if err := uc.fileRepo.Upsert(ctx, file); err != nil {
+	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
 		return fmt.Errorf("upsert file %s: %w", relPath, err)
 	}
 
-	// Delete stale data when re-indexing an existing file
-	if existing != nil {
-		if err := uc.symbolRepo.DeleteByFileID(ctx, file.ID); err != nil {
-			return err
+	// Clear old data for re-index
+	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
+
+	// Insert symbols
+	if len(parsed.Symbols) > 0 {
+		for i := range parsed.Symbols {
+			parsed.Symbols[i].FileID = fileRec.ID
 		}
-		if err := uc.endpointRepo.DeleteByFileID(ctx, file.ID); err != nil {
-			return err
+		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
+			return fmt.Errorf("insert symbols: %w", err)
 		}
-		if err := uc.importRepo.DeleteByFileID(ctx, file.ID); err != nil {
-			return err
+		stats["symbols"] += len(parsed.Symbols)
+	}
+
+	// Insert imports
+	if len(parsed.Imports) > 0 {
+		for i := range parsed.Imports {
+			parsed.Imports[i].FileID = fileRec.ID
 		}
+		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
+			return fmt.Errorf("insert imports: %w", err)
+		}
+		stats["imports"] += len(parsed.Imports)
 	}
 
-	symbols := make([]domain.Symbol, len(parsed.Symbols))
-	for i, s := range parsed.Symbols {
-		symbols[i] = s
-		symbols[i].FileID = file.ID
+	// Extract API endpoints
+	endpoints, _ := parser.ExtractRoutes(fullPath, parsed.Imports)
+	if len(endpoints) > 0 {
+		for i := range endpoints {
+			endpoints[i].FileID = fileRec.ID
+		}
+		if err := uc.epRepo.BulkInsert(ctx, endpoints); err != nil {
+			return fmt.Errorf("insert endpoints: %w", err)
+		}
+		stats["endpoints"] += len(endpoints)
 	}
 
-	imports := make([]domain.Import, len(parsed.Imports))
-	for i, imp := range parsed.Imports {
-		imports[i] = imp
-		imports[i].FileID = file.ID
+	// Detect cross-service connections (gRPC, Kafka)
+	connResult, err := parser.DetectConnections(fullPath)
+	if err == nil && len(connResult.Connections) > 0 {
+		for i := range connResult.Connections {
+			connResult.Connections[i].RepoID = repoID
+			connResult.Connections[i].FileID = fileRec.ID
+		}
+		*allConns = append(*allConns, connResult.Connections...)
 	}
 
-	eps := make([]domain.APIEndpoint, len(endpoints))
-	for i, ep := range endpoints {
-		eps[i] = ep
-		eps[i].FileID = file.ID
-	}
-
-	if err := uc.symbolRepo.BulkInsert(ctx, symbols); err != nil {
-		return fmt.Errorf("bulk insert symbols for %s: %w", relPath, err)
-	}
-	if err := uc.importRepo.BulkInsert(ctx, imports); err != nil {
-		return fmt.Errorf("bulk insert imports for %s: %w", relPath, err)
-	}
-	if err := uc.endpointRepo.BulkInsert(ctx, eps); err != nil {
-		return fmt.Errorf("bulk insert endpoints for %s: %w", relPath, err)
-	}
-
-	result.FilesIndexed++
-	result.SymbolsFound += len(symbols)
-	result.EndpointsFound += len(endpoints)
+	stats["files_indexed"]++
 	return nil
 }
 
-var indexableExts = map[string]bool{
-	".go":  true,
-	".tsx": true,
-	".ts":  true,
-	".jsx": true,
-	".js":  true,
-}
+// indexJSFile processes a single JS/TS/JSX/TSX file.
+func (uc *IndexRepoUseCase) indexJSFile(
+	ctx context.Context,
+	repoID int64,
+	absPath, relPath string,
+	force bool,
+	stats map[string]int,
+) error {
+	fullPath := filepath.Join(absPath, relPath)
 
-func isIndexableFile(path string) bool {
-	return indexableExts[filepath.Ext(path)]
-}
-
-func parseByExtension(filePath string) (*parser.ParseResult, error) {
-	switch filepath.Ext(filePath) {
-	case ".tsx", ".ts", ".jsx", ".js":
-		return parser.ParseJSXFile(filePath)
-	default:
-		return parser.ParseFile(filePath)
+	hash, err := hashFile(fullPath)
+	if err != nil {
+		return nil
 	}
+
+	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
+	if existing != nil && existing.Hash == hash && !force {
+		stats["files_skipped"]++
+		return nil
+	}
+
+	// Parse JSX/TS
+	parsed, err := parser.ParseJSXFile(fullPath)
+	if err != nil {
+		slog.Warn("parse JS failed", "file", relPath, "error", err)
+		return nil
+	}
+
+	fileRec := &domain.File{
+		RepoID: repoID,
+		Path:   relPath,
+		Hash:   hash,
+	}
+	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
+		return fmt.Errorf("upsert file %s: %w", relPath, err)
+	}
+
+	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
+
+	if len(parsed.Symbols) > 0 {
+		for i := range parsed.Symbols {
+			parsed.Symbols[i].FileID = fileRec.ID
+		}
+		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
+			return fmt.Errorf("insert symbols: %w", err)
+		}
+		stats["symbols"] += len(parsed.Symbols)
+	}
+
+	if len(parsed.Imports) > 0 {
+		for i := range parsed.Imports {
+			parsed.Imports[i].FileID = fileRec.ID
+		}
+		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
+			return fmt.Errorf("insert imports: %w", err)
+		}
+		stats["imports"] += len(parsed.Imports)
+	}
+
+	// Extract React routes
+	endpoints, _ := parser.ExtractReactRoutes(fullPath, parsed.Imports)
+	if len(endpoints) > 0 {
+		for i := range endpoints {
+			endpoints[i].FileID = fileRec.ID
+		}
+		if err := uc.epRepo.BulkInsert(ctx, endpoints); err != nil {
+			return fmt.Errorf("insert endpoints: %w", err)
+		}
+		stats["endpoints"] += len(endpoints)
+	}
+
+	stats["files_indexed"]++
+	return nil
 }
 
-func extractEndpointsByExtension(filePath string, imports []domain.Import) ([]domain.APIEndpoint, error) {
-	switch filepath.Ext(filePath) {
-	case ".tsx", ".ts", ".jsx", ".js":
-		return parser.ExtractReactRoutes(filePath, imports)
-	default:
-		return parser.ExtractRoutes(filePath, imports)
+func hashFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }

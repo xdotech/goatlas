@@ -1,6 +1,6 @@
 # GoAtlas — AI Code Intelligence & Spec Verification System
 
-GoAtlas is an **AI-powered code intelligence platform** that helps LLMs and developers deeply understand large Go/TypeScript codebases. It combines **AST parsing**, a **Neo4j knowledge graph**, **Qdrant vector search**, and **Gemini AI** to provide semantic code search, interactive Q&A, and specification coverage analysis — all exposed via the **Model Context Protocol (MCP)**.
+GoAtlas is an **AI-powered code intelligence platform** that helps LLMs and developers deeply understand large Go/TypeScript codebases. It combines **AST parsing**, a **Neo4j knowledge graph**, **pgvector/Qdrant vector search**, and **Gemini AI** to provide semantic code search, interactive Q&A, and specification coverage analysis — all exposed via the **Model Context Protocol (MCP)**.
 
 ---
 
@@ -10,7 +10,7 @@ GoAtlas is an **AI-powered code intelligence platform** that helps LLMs and deve
 |---------|-------------|
 | 🔍 **Code Indexing** | Parses Go/TS/JSX files via AST, extracts symbols (functions, types, methods, interfaces, consts, vars) and API endpoints (HTTP routes) |
 | 🧠 **Knowledge Graph** | Builds a Neo4j graph of packages, files, functions, types, and their import relationships |
-| 📐 **Vector Embeddings** | Generates Gemini embeddings for all indexed symbols, stored in Qdrant for semantic search |
+| 📐 **Vector Embeddings** | Generates Gemini embeddings for all indexed symbols, stored in **pgvector** (default) or Qdrant (optional) for semantic search |
 | 🤖 **AI Agent** | Gemini 2.0 Flash-powered agent with tool-calling (agentic loop up to 20 iterations) for code Q&A |
 | 💬 **Interactive Chat** | Multi-turn conversational interface with full conversation history |
 | 🔌 **MCP Server** | 10 MCP tools exposed via stdio transport for integration with AI assistants (Cursor, Claude Desktop, etc.) |
@@ -35,10 +35,12 @@ GoAtlas is an **AI-powered code intelligence platform** that helps LLMs and deve
     ▼         ▼        ▼           ▼           ▼         ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      Data Layer                             │
-│  PostgreSQL 17   │   Qdrant   │   Neo4j 5   │  Gemini API  │
-│  (files, symbols │   (vector  │   (graph    │  (embeddings │
-│   endpoints,     │   search)  │   queries)  │   + chat)    │
-│   imports)       │            │             │              │
+│  PostgreSQL + pgvector  │   Neo4j 5   │     Gemini API     │
+│  (files, symbols,       │   (graph    │     (embeddings    │
+│   endpoints, imports,   │   queries)  │      + chat)       │
+│   vector embeddings)    │             │                    │
+│                         │             │                    │
+│  [Optional: Qdrant as vector backend if QDRANT_URL is set] │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,7 +53,7 @@ goatlas/
 ├── main.go                          # Entry point → cmd.Execute()
 ├── go.mod                           # Go 1.25.3 module
 ├── Makefile                         # Build, test, lint, docker, migrate
-├── docker-compose.yml               # PostgreSQL + Qdrant + Neo4j
+├── docker-compose.yml               # PostgreSQL (pgvector) + Qdrant + Neo4j
 ├── .env.example                     # Environment variable template
 │
 ├── cmd/                             # CLI commands (Cobra)
@@ -76,7 +78,9 @@ goatlas/
     │   ├── usecase/                 # Index repo, search symbols
     │   └── service.go               # Service aggregator
     ├── vector/                      # Vector embedding & search
-    │   ├── client.go                # Qdrant gRPC client
+    │   ├── store.go                 # VectorStore interface
+    │   ├── pgvector.go              # pgvector implementation (default)
+    │   ├── client.go                # Qdrant implementation (optional)
     │   ├── embedder.go              # Gemini embedding generator
     │   ├── indexer.go               # Orchestrates embed pipeline
     │   └── searcher.go              # Semantic search queries
@@ -117,16 +121,30 @@ goatlas/
 ### 1. Start Infrastructure
 
 ```bash
-# Start PostgreSQL, Qdrant, and Neo4j
+# Start PostgreSQL (pgvector), Qdrant, and Neo4j
 make docker-up
 ```
 
 This starts:
-| Service    | Port(s)     | Credentials               |
-|------------|-------------|----------------------------|
-| PostgreSQL | `5432`      | `goatlas:goatlas/goatlas`   |
-| Qdrant     | `6333/6334` | —                          |
-| Neo4j      | `7474/7687` | `neo4j:goatlas_neo4j`      |
+| Service    | Port(s)     | Credentials               | Notes |
+|------------|-------------|----------------------------|-------|
+| PostgreSQL | `5432`      | `goatlas:goatlas/goatlas`   | Uses `pgvector/pgvector:pg17` image |
+| Qdrant     | `6333/6334` | —                          | Optional (only needed if `QDRANT_URL` is set) |
+| Neo4j      | `7474/7687` | `neo4j:goatlas_neo4j`      | Optional (for graph tools) |
+
+#### Using an existing PostgreSQL instance
+
+If you already have a PostgreSQL container running (e.g. `postgres:14`), install pgvector:
+
+```bash
+# Install pgvector extension inside the running container
+docker exec <container_name> bash -c "apt-get update && apt-get install -y postgresql-14-pgvector"
+
+# Enable the extension
+docker exec <container_name> psql -U <user> -d <database> -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+> **Note:** Replace `postgresql-14-pgvector` with the matching version for your PostgreSQL (e.g. `postgresql-15-pgvector`, `postgresql-16-pgvector`). This installation is lost when the container is recreated — for persistence, switch the image to `pgvector/pgvector:pgXX`.
 
 ### 2. Configure Environment
 
@@ -158,11 +176,14 @@ go run . index --force /path/to/your/repo
 ### 5. (Optional) Generate Embeddings
 
 ```bash
-# Embed all indexed symbols into Qdrant for semantic search
+# Embed all indexed symbols (uses pgvector by default)
 go run . embed
 
 # Force re-embed everything
 go run . embed --force
+
+# Use Qdrant instead of pgvector
+QDRANT_URL=http://localhost:6334 go run . embed
 ```
 
 ### 6. (Optional) Build Knowledge Graph
@@ -233,7 +254,7 @@ GoAtlas exposes **10 MCP tools** via the stdio transport:
 ### Search Modes
 
 - **`keyword`** (default) — PostgreSQL full-text search on symbol names and signatures
-- **`semantic`** — Qdrant vector similarity search using Gemini embeddings
+- **`semantic`** — Vector similarity search (pgvector or Qdrant) using Gemini embeddings
 - **`hybrid`** — Combines keyword + semantic results
 
 ---
@@ -248,6 +269,7 @@ GoAtlas exposes **10 MCP tools** via the stdio transport:
 | `symbols` | Code symbols: functions, types, methods, interfaces, consts, vars |
 | `api_endpoints` | Detected HTTP routes (method, path, handler, framework) |
 | `imports` | Go import statements per file |
+| `symbol_embeddings` | Vector embeddings for semantic search (pgvector, 768-dim, HNSW index) |
 
 ### Neo4j Graph Model
 
@@ -260,11 +282,17 @@ GoAtlas exposes **10 MCP tools** via the stdio transport:
 Node types: **Package**, **File**, **Function**, **Type**
 Edge types: **CONTAINS**, **DEFINES**, **IMPORTS**
 
-### Qdrant Vector Collection
+### Vector Storage
 
-- Collection: code symbol embeddings
-- Embedding model: Gemini text-embedding
-- Payload: symbol metadata (name, kind, qualified_name, file, signature)
+GoAtlas supports two vector backends via the `VectorStore` interface:
+
+| Backend | When Used | Storage |
+|---------|-----------|--------|
+| **pgvector** (default) | `QDRANT_URL` not set | PostgreSQL `symbol_embeddings` table with HNSW index |
+| **Qdrant** (optional) | `QDRANT_URL` is set | Qdrant `code_symbols` collection |
+
+- Embedding model: Gemini `text-embedding-004` (768 dimensions)
+- Distance metric: Cosine similarity
 
 ---
 
@@ -333,7 +361,7 @@ make clean
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_DSN` | `postgres://goatlas:goatlas@localhost:5432/goatlas` | PostgreSQL connection string |
-| `QDRANT_URL` | `http://localhost:6334` | Qdrant gRPC endpoint |
+| `QDRANT_URL` | — (empty) | Qdrant gRPC endpoint. **If set**, uses Qdrant for vectors. **If empty** (default), uses pgvector |
 | `NEO4J_URL` | `bolt://localhost:7687` | Neo4j Bolt endpoint |
 | `NEO4J_USER` | `neo4j` | Neo4j username |
 | `NEO4J_PASS` | `goatlas_neo4j` | Neo4j password |
@@ -353,7 +381,8 @@ make clean
 | `github.com/pressly/goose/v3` | Database migrations |
 | `github.com/mark3labs/mcp-go` | MCP server SDK |
 | `github.com/google/generative-ai-go` | Gemini AI client |
-| `github.com/qdrant/go-client` | Qdrant vector DB client |
+| `github.com/pgvector/pgvector-go` | pgvector (PostgreSQL vector extension) client |
+| `github.com/qdrant/go-client` | Qdrant vector DB client (optional backend) |
 | `github.com/neo4j/neo4j-go-driver/v5` | Neo4j graph DB driver |
 | `google.golang.org/api` | Google APIs support |
 

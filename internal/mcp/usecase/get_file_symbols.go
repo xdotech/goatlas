@@ -6,29 +6,30 @@ import (
 	"strings"
 
 	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // GetFileSymbolsUseCase retrieves all symbols defined in a specific file.
 type GetFileSymbolsUseCase struct {
-	fileRepo   domain.FileRepository
+	pool       *pgxpool.Pool
 	symbolRepo domain.SymbolRepository
 }
 
 // NewGetFileSymbolsUseCase constructs a GetFileSymbolsUseCase.
-func NewGetFileSymbolsUseCase(fr domain.FileRepository, sr domain.SymbolRepository) *GetFileSymbolsUseCase {
-	return &GetFileSymbolsUseCase{fileRepo: fr, symbolRepo: sr}
+func NewGetFileSymbolsUseCase(pool *pgxpool.Pool, sr domain.SymbolRepository) *GetFileSymbolsUseCase {
+	return &GetFileSymbolsUseCase{pool: pool, symbolRepo: sr}
 }
 
 // Execute returns all symbols in the given file path.
 func (uc *GetFileSymbolsUseCase) Execute(ctx context.Context, path string) (string, error) {
-	file, err := uc.fileRepo.GetByPath(ctx, "", path)
+	// Look up the file by path (across all repos)
+	var fileID int64
+	err := uc.pool.QueryRow(ctx, `SELECT id FROM files WHERE path = $1 LIMIT 1`, path).Scan(&fileID)
 	if err != nil {
-		return "", err
-	}
-	if file == nil {
 		return fmt.Sprintf("File %q not found in index", path), nil
 	}
-	symbols, err := uc.symbolRepo.GetByFile(ctx, file.ID)
+
+	symbols, err := uc.symbolRepo.GetByFile(ctx, fileID)
 	if err != nil {
 		return "", err
 	}
@@ -45,3 +46,4 @@ func (uc *GetFileSymbolsUseCase) Execute(ctx context.Context, path string) (stri
 	}
 	return sb.String(), nil
 }
+

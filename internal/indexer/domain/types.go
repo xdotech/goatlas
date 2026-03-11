@@ -5,17 +5,26 @@ import (
 	"time"
 )
 
-// File represents an indexed Go source file.
+// Repository represents an indexed code repository.
+type Repository struct {
+	ID            int64
+	Name          string
+	Path          string
+	LastIndexedAt *time.Time
+	LastCommit    string
+}
+
+// File represents an indexed source file, scoped to a repository.
 type File struct {
 	ID          int64
-	Repo        string
+	RepoID      int64
 	Path        string
 	Module      string
 	Hash        string
 	LastScanned time.Time
 }
 
-// Symbol represents a Go code symbol extracted from AST parsing.
+// Symbol represents a code symbol extracted from AST parsing.
 type Symbol struct {
 	ID            int64
 	FileID        int64
@@ -40,7 +49,7 @@ type APIEndpoint struct {
 	Line        int
 }
 
-// Import represents a Go import statement.
+// Import represents an import statement.
 type Import struct {
 	ID         int64
 	FileID     int64
@@ -48,10 +57,27 @@ type Import struct {
 	Alias      string
 }
 
+// ServiceConnection represents a cross-service dependency (gRPC call or Kafka pub/sub).
+type ServiceConnection struct {
+	ID       int64
+	RepoID   int64
+	ConnType string // "grpc", "kafka_publish", "kafka_consume"
+	Target   string // proto client name or topic name
+	FileID   int64
+	Line     int
+}
+
+// RepositoryRepository handles persistence of repository records.
+type RepositoryRepository interface {
+	Upsert(ctx context.Context, r *Repository) error
+	GetByName(ctx context.Context, name string) (*Repository, error)
+	List(ctx context.Context) ([]Repository, error)
+}
+
 // FileRepository handles persistence of file records.
 type FileRepository interface {
 	Upsert(ctx context.Context, f *File) error
-	GetByPath(ctx context.Context, repo, path string) (*File, error)
+	GetByPath(ctx context.Context, repoID int64, path string) (*File, error)
 	DeleteByID(ctx context.Context, id int64) error
 }
 
@@ -75,4 +101,12 @@ type EndpointRepository interface {
 type ImportRepository interface {
 	BulkInsert(ctx context.Context, imports []Import) error
 	DeleteByFileID(ctx context.Context, fileID int64) error
+}
+
+// ServiceConnectionRepository handles persistence of cross-service connections.
+type ServiceConnectionRepository interface {
+	BulkInsert(ctx context.Context, conns []ServiceConnection) error
+	DeleteByRepoID(ctx context.Context, repoID int64) error
+	List(ctx context.Context, connType string) ([]ServiceConnection, error)
+	ListByRepo(ctx context.Context, repoID int64) ([]ServiceConnection, error)
 }
