@@ -72,6 +72,14 @@ func DetectConnections(filePath string, cfg *PatternConfig) (*ConnectionResult, 
 			}
 		}
 
+		// Check HTTP client patterns
+		for _, p := range cfg.Go.HTTPClient {
+			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
+				result.Connections = append(result.Connections, *conn)
+				break
+			}
+		}
+
 		return true
 	})
 

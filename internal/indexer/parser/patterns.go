@@ -23,6 +23,7 @@ type GoPatterns struct {
 	GRPC          []GoCallPattern `yaml:"grpc"`
 	KafkaConsumer []GoCallPattern `yaml:"kafka_consumer"`
 	KafkaProducer []GoCallPattern `yaml:"kafka_producer"`
+	HTTPClient    []GoCallPattern `yaml:"http_client"`
 }
 
 // GoCallPattern describes a Go function call pattern to detect.

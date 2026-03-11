@@ -26,6 +26,16 @@ go:
       target_arg: 0
       conn_type: "kafka_publish"
 
+  http_client:
+    - package_suffix: "httpc"
+      function: "NewWithBaseURL"
+      target_arg: 0
+      conn_type: "http_api"
+    - package_suffix: "httpc"
+      function: "NewWithClientAndBaseURL"
+      target_arg: 0
+      conn_type: "http_api"
+
 # TypeScript/JavaScript detection patterns (regex-based, no AST needed)
 typescript:
   # Detect backend service references from SVC_PREFIX constants

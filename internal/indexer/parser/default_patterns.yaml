@@ -15,6 +15,15 @@ go:
       functions: ["Must", "New"]
       target_arg: 0
       conn_type: "kafka_publish"
+  http_client:
+    - package_suffix: "httpc"
+      function: "NewWithBaseURL"
+      target_arg: 0
+      conn_type: "http_api"
+    - package_suffix: "httpc"
+      function: "NewWithClientAndBaseURL"
+      target_arg: 0
+      conn_type: "http_api"
 typescript:
   api_prefix:
     - pattern: "=\\s*['\"`]([a-zA-Z0-9_-]+-svc)/api/"
