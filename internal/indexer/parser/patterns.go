@@ -48,12 +48,22 @@ type TSAPIPattern struct {
 	FileGlob string `yaml:"file_glob"`
 }
 
-// LoadPatterns loads detection patterns from goatlas.yaml in the repo root,
-// falling back to embedded defaults if the file doesn't exist.
+// LoadPatterns loads detection patterns with the following priority:
+//  1. {repoPath}/goatlas.yaml           (per-repo override)
+//  2. ~/.config/goatlas/goatlas.yaml     (global user config)
+//  3. Embedded default_patterns.yaml     (fallback)
 func LoadPatterns(repoPath string) (*PatternConfig, error) {
 	data := defaultPatternsYAML
 
-	// Try to load from repo-local goatlas.yaml
+	// Priority 2: global config
+	if home, err := os.UserHomeDir(); err == nil {
+		globalPath := filepath.Join(home, ".config", "goatlas", "goatlas.yaml")
+		if fileData, err := os.ReadFile(globalPath); err == nil {
+			data = fileData
+		}
+	}
+
+	// Priority 1: repo-local config (overrides global)
 	configPath := filepath.Join(repoPath, "goatlas.yaml")
 	if fileData, err := os.ReadFile(configPath); err == nil {
 		data = fileData
