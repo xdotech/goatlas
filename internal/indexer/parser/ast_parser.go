@@ -12,11 +12,12 @@ import (
 	"github.com/goatlas/goatlas/internal/indexer/domain"
 )
 
-// ParseResult holds the symbols and imports extracted from a single Go file.
+// ParseResult holds the symbols, imports, and endpoints extracted from a source file.
 type ParseResult struct {
-	Symbols []domain.Symbol
-	Imports []domain.Import
-	Module  string
+	Symbols   []domain.Symbol
+	Imports   []domain.Import
+	Endpoints []domain.APIEndpoint
+	Module    string
 }
 
 // ParseFile parses a Go source file and extracts symbols and imports.

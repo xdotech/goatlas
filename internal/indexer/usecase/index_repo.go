@@ -99,7 +99,8 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 		}
 		if info.IsDir() {
 			base := info.Name()
-			if base == "vendor" || base == "node_modules" || base == ".git" || base == "testdata" {
+			if base == "vendor" || base == "node_modules" || base == ".git" || base == "testdata" ||
+				base == "__pycache__" || base == ".venv" || base == "venv" || base == ".tox" || base == ".eggs" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -113,6 +114,8 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 			return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns, patternCfg)
 		case ".tsx", ".ts", ".jsx", ".js":
 			return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats, &allConns, patternCfg)
+		case ".py":
+			return uc.indexPythonFile(ctx, repo.ID, absPath, relPath, force, stats)
 		default:
 			return nil
 		}
@@ -387,4 +390,79 @@ func hashFile(path string) (string, error) {
 	}
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:]), nil
+}
+
+// indexPythonFile processes a single Python file.
+func (uc *IndexRepoUseCase) indexPythonFile(
+	ctx context.Context,
+	repoID int64,
+	absPath, relPath string,
+	force bool,
+	stats map[string]int,
+) error {
+	fullPath := filepath.Join(absPath, relPath)
+
+	hash, err := hashFile(fullPath)
+	if err != nil {
+		return nil
+	}
+
+	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
+	if existing != nil && existing.Hash == hash && !force {
+		stats["files_skipped"]++
+		return nil
+	}
+
+	parsed, err := parser.ParsePythonFile(fullPath)
+	if err != nil {
+		slog.Warn("parse Python failed", "file", relPath, "error", err)
+		return nil
+	}
+
+	fileRec := &domain.File{
+		RepoID: repoID,
+		Path:   relPath,
+		Module: parsed.Module,
+		Hash:   hash,
+	}
+	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
+		return fmt.Errorf("upsert file %s: %w", relPath, err)
+	}
+
+	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
+
+	if len(parsed.Symbols) > 0 {
+		for i := range parsed.Symbols {
+			parsed.Symbols[i].FileID = fileRec.ID
+		}
+		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
+			return fmt.Errorf("insert symbols: %w", err)
+		}
+		stats["symbols"] += len(parsed.Symbols)
+	}
+
+	if len(parsed.Imports) > 0 {
+		for i := range parsed.Imports {
+			parsed.Imports[i].FileID = fileRec.ID
+		}
+		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
+			return fmt.Errorf("insert imports: %w", err)
+		}
+		stats["imports"] += len(parsed.Imports)
+	}
+
+	if len(parsed.Endpoints) > 0 {
+		for i := range parsed.Endpoints {
+			parsed.Endpoints[i].FileID = fileRec.ID
+		}
+		if err := uc.epRepo.BulkInsert(ctx, parsed.Endpoints); err != nil {
+			return fmt.Errorf("insert endpoints: %w", err)
+		}
+		stats["endpoints"] += len(parsed.Endpoints)
+	}
+
+	stats["files_indexed"]++
+	return nil
 }
