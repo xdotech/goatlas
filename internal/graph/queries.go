@@ -73,16 +73,24 @@ func (q *Querier) FindCallers(ctx context.Context, functionName string, depth in
 		depth = 5
 	}
 
-	// First try recursive CALLS-based query
+	// First try recursive CALLS-based query (includes IMPLEMENTS traversal)
 	records, err := q.client.QueryNodes(ctx, fmt.Sprintf(`
 		MATCH path = (caller:Function)-[:CALLS*1..%d]->(target:Function)
 		WHERE target.name = $name OR target.qualified CONTAINS $name
 		RETURN DISTINCT caller.name AS name, caller.qualified AS qualified,
 		       caller.file AS file, caller.line AS line,
 		       length(path) AS depth
+		UNION
+		MATCH (target:Function)-[:IMPLEMENTS]->(iface:Type)<-[:IMPLEMENTS]-(impl:Function)
+		WHERE target.name = $name OR target.qualified CONTAINS $name
+		WITH impl
+		MATCH path = (caller:Function)-[:CALLS*1..%d]->(impl)
+		RETURN DISTINCT caller.name AS name, caller.qualified AS qualified,
+		       caller.file AS file, caller.line AS line,
+		       length(path) + 1 AS depth
 		ORDER BY depth, name
 		LIMIT 50
-	`, depth), map[string]any{"name": functionName})
+	`, depth, depth), map[string]any{"name": functionName})
 	if err != nil {
 		return nil, err
 	}

@@ -53,6 +53,9 @@ type APIEndpoint struct {
 	HandlerName string
 	Framework   string
 	Line        int
+	// Populated by List query (JOIN), not persisted in api_endpoints table
+	FilePath string
+	RepoName string
 }
 
 // Import represents an import statement.

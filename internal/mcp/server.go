@@ -39,7 +39,7 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher, cfg.RepoRoot),
 		usecase.NewReadFileUseCase(cfg.RepoRoot),
 		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo, cfg.RepoRoot),
-		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo),
+		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo, cfg.IndexerSvc.IIRepo),
 		usecase.NewListEndpointsUseCase(cfg.IndexerSvc.EndpointRepo),
 		usecase.NewGetFileSymbolsUseCase(cfg.Pool, cfg.IndexerSvc.SymbolRepo),
 		usecase.NewListServicesUseCase(cfg.Pool),

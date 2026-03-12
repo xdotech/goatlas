@@ -25,7 +25,11 @@ func (uc *ListEndpointsUseCase) Execute(ctx context.Context, method, service str
 		return "", err
 	}
 	if len(endpoints) == 0 {
-		return "No API endpoints found", nil
+		msg := "No API endpoints found"
+		if service != "" {
+			msg += fmt.Sprintf(" for service %q", service)
+		}
+		return msg, nil
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Found %d API endpoint(s):\n\n", len(endpoints)))
@@ -37,7 +41,15 @@ func (uc *ListEndpointsUseCase) Execute(ctx context.Context, method, service str
 		if e.Framework != "" {
 			sb.WriteString(fmt.Sprintf(" [%s]", e.Framework))
 		}
-		sb.WriteString(fmt.Sprintf(" (line %d)\n", e.Line))
+		if e.FilePath != "" {
+			sb.WriteString(fmt.Sprintf(" @ %s:%d", e.FilePath, e.Line))
+		} else {
+			sb.WriteString(fmt.Sprintf(" (line %d)", e.Line))
+		}
+		if e.RepoName != "" {
+			sb.WriteString(fmt.Sprintf(" {%s}", e.RepoName))
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String(), nil
 }

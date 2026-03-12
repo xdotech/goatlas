@@ -51,7 +51,7 @@ var askCmd = &cobra.Command{
 			SearchCode:     mcpusecase.NewSearchCodeUseCase(indexerSvc.SymbolRepo, nil, cfg.RepoPath),
 			ReadFile:       mcpusecase.NewReadFileUseCase(cfg.RepoPath),
 			FindSymbol:     mcpusecase.NewFindSymbolUseCase(indexerSvc.SymbolRepo, cfg.RepoPath),
-			FindCallers:    mcpusecase.NewFindCallersUseCase(indexerSvc.SymbolRepo),
+			FindCallers:    mcpusecase.NewFindCallersUseCase(indexerSvc.SymbolRepo, indexerSvc.IIRepo),
 			ListEndpoints:  mcpusecase.NewListEndpointsUseCase(indexerSvc.EndpointRepo),
 			GetFileSymbols: mcpusecase.NewGetFileSymbolsUseCase(pool, indexerSvc.SymbolRepo),
 			ListServices:   mcpusecase.NewListServicesUseCase(pool),

@@ -26,6 +26,7 @@ type IndexRepoUseCase struct {
 	cacRepo    domain.ComponentAPICallRepository
 	fcRepo     domain.FunctionCallRepository
 	tuRepo     domain.TypeUsageRepository
+	iiRepo     domain.InterfaceImplRepository
 }
 
 // NewIndexRepoUseCase constructs a new IndexRepoUseCase.
@@ -39,6 +40,7 @@ func NewIndexRepoUseCase(
 	cacRepo domain.ComponentAPICallRepository,
 	fcRepo domain.FunctionCallRepository,
 	tuRepo domain.TypeUsageRepository,
+	iiRepo domain.InterfaceImplRepository,
 ) *IndexRepoUseCase {
 	return &IndexRepoUseCase{
 		repoRepo:   repoRepo,
@@ -50,6 +52,7 @@ func NewIndexRepoUseCase(
 		cacRepo:    cacRepo,
 		fcRepo:     fcRepo,
 		tuRepo:     tuRepo,
+		iiRepo:     iiRepo,
 	}
 }
 
@@ -270,6 +273,19 @@ func (uc *IndexRepoUseCase) indexGoFile(
 			slog.Warn("insert type usages failed", "file", relPath, "error", err)
 		}
 		stats["type_usages"] += len(typeUsages)
+	}
+
+	// Extract interface implementations
+	_ = uc.iiRepo.DeleteByFileID(ctx, fileRec.ID)
+	impls, iiErr := parser.ExtractInterfaceImpls(fullPath)
+	if iiErr == nil && len(impls) > 0 {
+		for i := range impls {
+			impls[i].FileID = fileRec.ID
+		}
+		if err := uc.iiRepo.BulkInsert(ctx, impls); err != nil {
+			slog.Warn("insert interface impls failed", "file", relPath, "error", err)
+		}
+		stats["interface_impls"] += len(impls)
 	}
 
 	stats["files_indexed"]++

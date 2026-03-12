@@ -42,18 +42,28 @@ func (r *EndpointRepo) DeleteByFileID(ctx context.Context, fileID int64) error {
 	return err
 }
 
-// List returns API endpoints, optionally filtered by HTTP method.
-// The service parameter is reserved for future path-prefix filtering.
+// List returns API endpoints, optionally filtered by HTTP method and service (repository name).
 func (r *EndpointRepo) List(ctx context.Context, method, service string) ([]domain.APIEndpoint, error) {
-	query := `SELECT id, file_id, method, path, handler_name, framework, line FROM api_endpoints WHERE 1=1`
+	query := `SELECT e.id, e.file_id, e.method, e.path, e.handler_name, e.framework, e.line,
+	                  f.path AS file_path, COALESCE(r.name, '') AS repo_name
+	           FROM api_endpoints e
+	           JOIN files f ON e.file_id = f.id
+	           LEFT JOIN repositories r ON f.repo_id = r.id
+	           WHERE 1=1`
 	args := []interface{}{}
 	argN := 1
 	if method != "" {
-		query += fmt.Sprintf(" AND method = $%d", argN)
+		query += fmt.Sprintf(" AND e.method = $%d", argN)
 		args = append(args, method)
 		argN++
 	}
-	_ = argN // suppress unused warning; reserved for future filters
+	if service != "" {
+		query += fmt.Sprintf(" AND r.name ILIKE '%%' || $%d || '%%'", argN)
+		args = append(args, service)
+		argN++
+	}
+	_ = argN
+	query += " ORDER BY e.path, e.method"
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -64,7 +74,7 @@ func (r *EndpointRepo) List(ctx context.Context, method, service string) ([]doma
 	var endpoints []domain.APIEndpoint
 	for rows.Next() {
 		var e domain.APIEndpoint
-		if err := rows.Scan(&e.ID, &e.FileID, &e.Method, &e.Path, &e.HandlerName, &e.Framework, &e.Line); err != nil {
+		if err := rows.Scan(&e.ID, &e.FileID, &e.Method, &e.Path, &e.HandlerName, &e.Framework, &e.Line, &e.FilePath, &e.RepoName); err != nil {
 			return nil, err
 		}
 		endpoints = append(endpoints, e)

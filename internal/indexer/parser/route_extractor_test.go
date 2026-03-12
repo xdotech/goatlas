@@ -120,6 +120,7 @@ func TestDetectFramework(t *testing.T) {
 		imports  []domain.Import
 		expected string
 	}{
+		{[]domain.Import{{ImportPath: "github.com/zeromicro/go-zero/rest"}}, "go_zero"},
 		{[]domain.Import{{ImportPath: "github.com/gin-gonic/gin"}}, "gin"},
 		{[]domain.Import{{ImportPath: "github.com/labstack/echo/v4"}}, "echo"},
 		{[]domain.Import{{ImportPath: "github.com/go-chi/chi/v5"}}, "chi"},
@@ -134,3 +135,109 @@ func TestDetectFramework(t *testing.T) {
 		}
 	}
 }
+
+const goZeroProtoFixture = `package allocationpb
+
+import (
+	rest "github.com/zeromicro/go-zero/rest"
+	http "net/http"
+)
+
+func RegisterAllocationHTTPServer(s *rest.Server, srv interface{}) []rest.Route {
+	var routes = []rest.Route{
+		{
+			Method:  "GET",
+			Path:    "/wms-execution-svc/api/v1/allocate/picking-lines",
+			Handler: nil,
+		},
+		{
+			Method:  "POST",
+			Path:    "/wms-execution-svc/api/v1/allocate/picking-lines",
+			Handler: nil,
+		},
+		{
+			Method:  "POST",
+			Path:    "/wms-execution-svc/api/v1/allocate/release-lock",
+			Handler: nil,
+		},
+	}
+	return routes
+}
+`
+
+const goZeroHandwrittenFixture = `package handler
+
+import (
+	"net/http"
+	"github.com/zeromicro/go-zero/rest"
+)
+
+func RegisterExportRoute() []rest.Route {
+	return []rest.Route{
+		{
+			Method:  http.MethodGet,
+			Path:    "/wms-execution-svc/api/v1/refill/one-step/tasks/export",
+			Handler: nil,
+		},
+	}
+}
+`
+
+func TestExtractRoutes_GoZero_Proto(t *testing.T) {
+	f := writeFixture(t, "allocation_http.pb.go", goZeroProtoFixture)
+	imports := []domain.Import{{ImportPath: "github.com/zeromicro/go-zero/rest"}}
+
+	endpoints, err := ExtractRoutes(f, imports)
+	if err != nil {
+		t.Fatalf("ExtractRoutes error: %v", err)
+	}
+
+	if len(endpoints) != 3 {
+		t.Fatalf("expected 3 endpoints, got %d", len(endpoints))
+	}
+
+	// Verify methods
+	expectedMethods := []string{"GET", "POST", "POST"}
+	for i, ep := range endpoints {
+		if ep.Method != expectedMethods[i] {
+			t.Errorf("endpoint %d: expected method %q, got %q", i, expectedMethods[i], ep.Method)
+		}
+		if ep.Framework != "go_zero" {
+			t.Errorf("endpoint %d: expected framework 'go_zero', got %q", i, ep.Framework)
+		}
+	}
+
+	// Verify paths
+	if endpoints[0].Path != "/wms-execution-svc/api/v1/allocate/picking-lines" {
+		t.Errorf("unexpected path: %s", endpoints[0].Path)
+	}
+	if endpoints[2].Path != "/wms-execution-svc/api/v1/allocate/release-lock" {
+		t.Errorf("unexpected path: %s", endpoints[2].Path)
+	}
+}
+
+func TestExtractRoutes_GoZero_Handwritten(t *testing.T) {
+	f := writeFixture(t, "http_handler.go", goZeroHandwrittenFixture)
+	imports := []domain.Import{{ImportPath: "github.com/zeromicro/go-zero/rest"}}
+
+	endpoints, err := ExtractRoutes(f, imports)
+	if err != nil {
+		t.Fatalf("ExtractRoutes error: %v", err)
+	}
+
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(endpoints))
+	}
+
+	ep := endpoints[0]
+	if ep.Method != "GET" {
+		t.Errorf("expected method GET, got %q", ep.Method)
+	}
+	if ep.Path != "/wms-execution-svc/api/v1/refill/one-step/tasks/export" {
+		t.Errorf("unexpected path: %s", ep.Path)
+	}
+	if ep.Framework != "go_zero" {
+		t.Errorf("expected framework 'go_zero', got %q", ep.Framework)
+	}
+}
+

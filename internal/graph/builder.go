@@ -30,6 +30,7 @@ type BuildResult struct {
 	ComponentEdges  int
 	CallEdges       int
 	TypeFlowEdges   int
+	ImplementsEdges int
 }
 
 // Build populates the Neo4j graph from the PostgreSQL index.
@@ -59,6 +60,9 @@ func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	}
 	if err := b.buildTypeFlowEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build type flow edges: %w", err)
+	}
+	if err := b.buildImplementsEdges(ctx, result); err != nil {
+		return nil, fmt.Errorf("build implements edges: %w", err)
 	}
 
 	return result, nil
@@ -422,6 +426,43 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 			return err
 		}
 		result.TypeFlowEdges++
+	}
+	return rows.Err()
+}
+
+// buildImplementsEdges creates IMPLEMENTS edges between struct method (Function)
+// and interface (Type) nodes, using data from the interface_impls table.
+func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult) error {
+	rows, err := b.pool.Query(ctx, `
+		SELECT interface_name, struct_name, method_name
+		FROM interface_impls
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var interfaceName, structName, methodName string
+		if err := rows.Scan(&interfaceName, &structName, &methodName); err != nil {
+			return err
+		}
+
+		cypher := `
+			MATCH (fn:Function)
+			WHERE fn.qualified CONTAINS $struct_name AND fn.name = $method
+			MERGE (iface:Type {name: $iface_name})
+			MERGE (fn)-[:IMPLEMENTS {method: $method}]->(iface)
+		`
+		params := map[string]any{
+			"struct_name": structName,
+			"method":      methodName,
+			"iface_name":  interfaceName,
+		}
+		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+			return err
+		}
+		result.ImplementsEdges++
 	}
 	return rows.Err()
 }
