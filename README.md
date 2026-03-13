@@ -1,116 +1,132 @@
-# GoAtlas — AI Code Intelligence & Spec Verification System
+# GoAtlas
 
-GoAtlas is an **AI-powered code intelligence platform** that helps LLMs and developers deeply understand large Go/TypeScript codebases. It combines **AST parsing**, a **Neo4j knowledge graph**, **pgvector/Qdrant vector search**, and **Gemini AI** to provide semantic code search, interactive Q&A, and specification coverage analysis — all exposed via the **Model Context Protocol (MCP)**.
+[![Go](https://img.shields.io/badge/Go_1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/) [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/) [![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com/) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/) [![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/) [![MCP](https://img.shields.io/badge/MCP-Protocol-blueviolet?style=flat-square)](https://modelcontextprotocol.io/)
 
----
+**GoAtlas** is an AI-powered code intelligence platform that helps LLMs and developers deeply understand large Go/TypeScript codebases — combining AST parsing, a Neo4j knowledge graph, pgvector semantic search, and Gemini AI, all exposed via the **Model Context Protocol (MCP)**.
 
-## ✨ Key Features
+## What Makes It Different
 
-| Feature | Description |
-|---------|-------------|
-| 🔍 **Code Indexing** | Parses Go/TS/JSX files via AST, extracts symbols (functions, types, methods, interfaces, consts, vars) and API endpoints (HTTP routes) |
-| 🧠 **Knowledge Graph** | Builds a Neo4j graph of packages, files, functions, types, and their import relationships |
-| 📐 **Vector Embeddings** | Generates Gemini embeddings for all indexed symbols, stored in **pgvector** (default) or Qdrant (optional) for semantic search |
-| 🤖 **AI Agent** | Gemini 2.0 Flash-powered agent with tool-calling (agentic loop up to 20 iterations) for code Q&A |
-| 💬 **Interactive Chat** | Multi-turn conversational interface with full conversation history |
-| 🔌 **MCP Server** | 10 MCP tools exposed via stdio transport for integration with AI assistants (Cursor, Claude Desktop, etc.) |
-| 📊 **Spec Coverage** | Parses feature specification documents and detects implementation coverage in the codebase |
+- **Deep AST Indexing** — Parses Go/TS/JSX/Python files to extract every symbol (functions, types, methods, interfaces, consts, vars) and HTTP endpoints
+- **Knowledge Graph** — Builds a Neo4j graph of packages, files, functions, types, and their import/call relationships
+- **Semantic Search** — Gemini `text-embedding-004` embeddings stored in pgvector (or Qdrant) for meaning-based code discovery
+- **AI Agent** — Gemini 2.0 Flash agent with agentic tool-calling loop (up to 20 iterations) for code Q&A
+- **MCP Server** — 10+ MCP tools via stdio transport for seamless integration with Cursor, Claude Desktop, and other AI assistants
+- **Spec Coverage** — Parses feature specs and detects implementation coverage in the codebase
+- **Interactive Chat** — Multi-turn conversational interface with full conversation history
 
----
+## Architecture
 
-## 🏗️ Architecture Overview
+```mermaid
+graph TB
+    subgraph CLI["GoAtlas CLI"]
+        direction LR
+        IDX["index"]
+        EMB["embed"]
+        GR["build-graph"]
+        ASK["ask"]
+        CHT["chat"]
+        SRV["serve"]
+        COV["coverage"]
+    end
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                         GoAtlas CLI                          │
-│  index │ embed │ build-graph │ ask │ chat │ serve │ coverage │
-└────┬──────┬────────┬──────────┬──────┬───────┬──────┬────────┘
-     │      │        │          │      │       │      │
-     ▼      ▼        ▼          ▼      ▼       ▼      ▼
-┌────────┐ ┌──────┐ ┌───────┐ ┌──────────┐ ┌──────┐ ┌────────┐
-│Indexer │ │Vector│ │ Graph │ │  Agent   │ │ MCP  │ │Coverage│
-│  (AST) │ │Embed │ │Builder│ │(Gemini)  │ │Server│ │Checker │
-└───┬────┘ └──┬───┘ └──┬────┘ └────┬─────┘ └──┬───┘ └───┬────┘
-    │         │        │           │           │         │
-    ▼         ▼        ▼           ▼           ▼         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Data Layer                             │
-│  PostgreSQL + pgvector  │   Neo4j 5   │     Gemini API     │
-│  (files, symbols,       │   (graph    │     (embeddings    │
-│   endpoints, imports,   │   queries)  │      + chat)       │
-│   vector embeddings)    │             │                    │
-│                         │             │                    │
-│  [Optional: Qdrant as vector backend if QDRANT_URL is set] │
-└─────────────────────────────────────────────────────────────┘
-```
+    subgraph Core["Core Engine"]
+        direction TB
+        PARSER["AST Parsers<br/>Go · TS/JSX · Python"]
+        INDEXER["Code Indexer<br/>symbols · endpoints · imports"]
+        AGENT["Gemini Agent<br/>agentic tool-calling loop"]
+        MCP["MCP Server<br/>stdio transport"]
+        COVERAGE["Coverage Checker<br/>spec vs codebase"]
+    end
 
----
+    subgraph Data["Data Layer"]
+        PG["PostgreSQL + pgvector<br/>files · symbols · endpoints<br/>imports · vector embeddings"]
+        NEO["Neo4j 5<br/>knowledge graph"]
+        GEMINI["Gemini API<br/>embeddings + chat"]
+        QD["Qdrant (optional)<br/>vector backend"]
+    end
 
-## 📂 Project Structure
+    subgraph Clients["AI Assistants"]
+        CURSOR["Cursor"]
+        CLAUDE["Claude Desktop"]
+        ANY["Any MCP Client"]
+    end
 
-```
-goatlas/
-├── main.go                          # Entry point → cmd.Execute()
-├── go.mod                           # Go 1.25.3 module
-├── Makefile                         # Build, test, lint, docker, migrate
-├── docker-compose.yml               # PostgreSQL (pgvector) + Qdrant + Neo4j
-├── .env.example                     # Environment variable template
-│
-├── cmd/                             # CLI commands (Cobra)
-│   ├── root.go                      # Root command definition
-│   ├── index.go                     # `goatlas index <repo-path>`
-│   ├── embed.go                     # `goatlas embed`
-│   ├── graph.go                     # `goatlas build-graph`
-│   ├── ask.go                       # `goatlas ask <question>`
-│   ├── chat.go                      # `goatlas chat` (interactive)
-│   ├── serve.go                     # `goatlas serve` (MCP stdio)
-│   ├── coverage.go                  # `goatlas check-coverage <spec>`
-│   └── migrate.go                   # `goatlas migrate`
-│
-└── internal/                        # Application packages
-    ├── config/                      # Configuration (Viper + .env)
-    ├── db/                          # PostgreSQL pool + Goose migrations
-    │   └── migrations/              # SQL migration files (embedded)
-    ├── indexer/                     # Code indexing engine
-    │   ├── domain/                  # Domain types (File, Symbol, Endpoint, Import)
-    │   ├── parser/                  # AST parsers (Go + JSX/TSX)
-    │   ├── repository/postgres/     # PostgreSQL repos (file, symbol, endpoint, import)
-    │   ├── usecase/                 # Index repo, search symbols
-    │   └── service.go               # Service aggregator
-    ├── vector/                      # Vector embedding & search
-    │   ├── store.go                 # VectorStore interface
-    │   ├── pgvector.go              # pgvector implementation (default)
-    │   ├── client.go                # Qdrant implementation (optional)
-    │   ├── embedder.go              # Gemini embedding generator
-    │   ├── indexer.go               # Orchestrates embed pipeline
-    │   └── searcher.go              # Semantic search queries
-    ├── graph/                       # Neo4j knowledge graph
-    │   ├── client.go                # Neo4j driver wrapper
-    │   ├── builder.go               # Graph construction from indexed data
-    │   ├── queries.go               # Cypher query methods
-    │   └── types.go                 # Graph node/edge types
-    ├── agent/                       # Gemini AI agent
-    │   ├── agent.go                 # Agentic loop (Ask + Chat)
-    │   ├── tool_bridge.go           # Bridges MCP tools → Gemini function calls
-    │   ├── tool_declarations.go     # Gemini FunctionDeclaration schemas
-    │   ├── system_prompt.go         # Dynamic system prompt builder
-    │   └── types.go                 # AgentConfig, ConversationMessage
-    ├── mcp/                         # MCP server implementation
-    │   ├── server.go                # Server wiring + stdio transport
-    │   ├── domain/tools.go          # MCP tool input types
-    │   ├── handler/mcp_handler.go   # 10 MCP tool registrations
-    │   └── usecase/                 # Tool use case implementations
-    └── coverage/                    # Spec coverage analysis
-        ├── parser.go                # Spec file parser (markdown)
-        ├── gemini_parser.go         # AI-powered feature extraction
-        ├── detector.go              # Implementation detection engine
-        ├── reporter.go              # Text/JSON/Markdown report generators
-        └── types.go                 # Feature, Component, CoverageReport
+    IDX --> PARSER --> INDEXER --> PG
+    EMB --> GEMINI --> PG
+    GR --> NEO
+    ASK & CHT --> AGENT --> MCP
+    SRV --> MCP
+    COV --> COVERAGE
+    MCP --> PG & NEO & GEMINI
+    CURSOR & CLAUDE & ANY --> MCP
 ```
 
----
+## Features
 
-## 🚀 Getting Started
+### Code Intelligence
+- **Multi-Language Parsing** — Go, TypeScript, JSX/TSX, Python via AST
+- **Symbol Extraction** — Functions, types, methods, interfaces, constants, variables
+- **API Endpoint Detection** — HTTP routes from go-zero, gin, echo, chi, net/http, and more
+- **Import Graph** — Full import dependency tracking per file
+
+### Search & Discovery
+- **Keyword Search** — PostgreSQL full-text search on symbol names and signatures
+- **Semantic Search** — Vector similarity search using Gemini embeddings (pgvector or Qdrant)
+- **Hybrid Search** — Combines keyword + semantic for best results
+- **Symbol Lookup** — Find symbols by exact name with kind filter
+
+### Knowledge Graph (Neo4j)
+- **Package → File → Symbol** relationships
+- **Import edges** between packages
+- **Handler pattern matching** for API discovery
+- **Service dependency mapping**
+
+### AI Agent
+- **Agentic Loop** — Up to 20 tool-calling iterations per question
+- **Dynamic System Prompt** — Includes repo summary and available tools
+- **Multi-Turn Chat** — Full conversation history support
+- **Tool Bridge** — Bridges MCP tools to Gemini function calls
+
+### Spec Coverage
+- **Feature Extraction** — AI-powered (Gemini) or regex-based parsing
+- **Implementation Detection** — Matches spec components against indexed symbols
+- **Coverage Reports** — Text, JSON, or Markdown output with status per feature
+
+## MCP Tools Reference
+
+GoAtlas exposes **10+ MCP tools** via the stdio transport:
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `search_code` | Search symbols by keyword/semantic/hybrid | `query*`, `limit`, `kind`, `mode` |
+| `read_file` | Read file content with optional line range | `path*`, `start_line`, `end_line` |
+| `find_symbol` | Find a specific symbol by name | `name*`, `kind` |
+| `find_callers` | Find functions referencing a given function | `function_name*` |
+| `list_api_endpoints` | List detected HTTP routes in the codebase | `method`, `service` |
+| `get_file_symbols` | Get all symbols defined in a file | `path*` |
+| `list_services` | List all top-level packages/services | — |
+| `get_service_dependencies` | Get import graph for a service (Neo4j) | `service*` |
+| `get_api_handlers` | Find handler functions matching a pattern (Neo4j) | `pattern*` |
+| `list_components` | List React components, hooks, interfaces, type aliases | `kind`, `limit` |
+
+\* = required parameter
+
+<details>
+<summary><strong>Additional MCP Tools</strong></summary>
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `index_repository` | Index or re-index a repository | `path*`, `force` |
+| `build_graph` | Build the Neo4j knowledge graph | — |
+| `generate_embeddings` | Generate vector embeddings for symbols | `force` |
+| `analyze_impact` | Find all affected callers for a function | `symbol*`, `max_depth` |
+| `trace_type_flow` | Trace data type producers and consumers | `type_name*`, `direction` |
+| `get_api_consumers` | Find UI components calling an API endpoint | `api_path*`, `method` |
+| `get_component_apis` | Get APIs called by a React component | `component*` |
+
+</details>
+
+## Getting Started
 
 ### Prerequisites
 
@@ -144,7 +160,7 @@ docker exec <container_name> bash -c "apt-get update && apt-get install -y postg
 docker exec <container_name> psql -U <user> -d <database> -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-> **Note:** Replace `postgresql-14-pgvector` with the matching version for your PostgreSQL (e.g. `postgresql-15-pgvector`, `postgresql-16-pgvector`). This installation is lost when the container is recreated — for persistence, switch the image to `pgvector/pgvector:pgXX`.
+> **Note:** Replace `postgresql-14-pgvector` with the matching version for your PostgreSQL. This installation is lost when the container is recreated — for persistence, switch the image to `pgvector/pgvector:pgXX`.
 
 ### 2. Configure Environment
 
@@ -176,36 +192,25 @@ go run . index --force /path/to/your/repo
 ### 5. (Optional) Generate Embeddings
 
 ```bash
-# Embed all indexed symbols (uses pgvector by default)
-go run . embed
-
-# Force re-embed everything
-go run . embed --force
-
-# Use Qdrant instead of pgvector
-QDRANT_URL=http://localhost:6334 go run . embed
+go run . embed          # Embed all indexed symbols (pgvector)
+go run . embed --force  # Force re-embed everything
 ```
 
 ### 6. (Optional) Build Knowledge Graph
 
 ```bash
-# Populate Neo4j with package/file/function/type/import relationships
-go run . build-graph
+go run . build-graph    # Populate Neo4j graph
 ```
 
----
+## Usage
 
-## 💻 Usage
-
-### Ask a Question (Single-Shot)
-
+**Single-Shot Question:**
 ```bash
 goatlas ask "How does the authentication middleware work?"
 goatlas ask "What endpoints does the user service expose?"
 ```
 
-### Interactive Chat
-
+**Interactive Chat:**
 ```bash
 goatlas chat
 # > You: What's the main entry point?
@@ -213,55 +218,117 @@ goatlas chat
 # > You: exit
 ```
 
-### Spec Coverage Check
-
+**Spec Coverage:**
 ```bash
-# Check feature spec coverage (with AI extraction)
 goatlas check-coverage spec.md --format md
-
-# Without AI (regex-only parsing)
 goatlas check-coverage spec.md --no-ai --format json
 ```
 
-### MCP Server Mode
-
+**MCP Server:**
 ```bash
-# Start as an MCP server for AI assistants
 goatlas serve
 ```
 
----
+## CLI Tool Integration
 
-## 🔧 MCP Tools Reference
+**Cursor** — `~/.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "goatlas": {
+      "command": "goatlas",
+      "args": ["serve"]
+    }
+  }
+}
+```
 
-GoAtlas exposes **10 MCP tools** via the stdio transport:
+**Claude Desktop** — `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "goatlas": {
+      "command": "goatlas",
+      "args": ["serve"]
+    }
+  }
+}
+```
 
-| # | Tool | Description | Key Parameters |
-|---|------|-------------|----------------|
-| 1 | `search_code` | Search symbols by keyword/semantic/hybrid | `query*`, `limit`, `kind`, `mode` |
-| 2 | `read_file` | Read file content with optional line range | `path*`, `start_line`, `end_line` |
-| 3 | `find_symbol` | Find a specific symbol by name | `name*`, `kind` |
-| 4 | `find_callers` | Find functions referencing a given function | `function_name*` |
-| 5 | `list_api_endpoints` | List detected HTTP routes in the codebase | `method`, `service` |
-| 6 | `get_file_symbols` | Get all symbols defined in a file | `path*` |
-| 7 | `list_services` | List all top-level packages/services | — |
-| 8 | `get_service_dependencies` | Get import graph for a service (Neo4j) | `service*` |
-| 9 | `get_api_handlers` | Find handler functions matching a pattern (Neo4j) | `pattern*` |
-| 10 | `list_components` | List React components, hooks, interfaces, type aliases | `kind`, `limit` |
+## Project Structure
 
-\* = required parameter
+```
+cmd/goatlas/              Entrypoint (Cobra CLI)
+internal/
+  config/                 Configuration (Viper + .env)
+  db/                     PostgreSQL pool + Goose migrations
+    migrations/           SQL migration files (embedded)
+  indexer/                Code indexing engine
+    domain/               Domain types (File, Symbol, Endpoint, Import)
+    parser/               AST parsers (Go + JSX/TSX + Python)
+    repository/postgres/  PostgreSQL repos (file, symbol, endpoint, import)
+    usecase/              Index repo, search symbols
+  vector/                 Vector embedding & search
+    store.go              VectorStore interface
+    pgvector.go           pgvector implementation (default)
+    client.go             Qdrant implementation (optional)
+    embedder.go           Gemini embedding generator
+    indexer.go            Embed pipeline orchestrator
+    searcher.go           Semantic search queries
+  graph/                  Neo4j knowledge graph
+    client.go             Neo4j driver wrapper
+    builder.go            Graph construction from indexed data
+    queries.go            Cypher query methods
+  agent/                  Gemini AI agent
+    agent.go              Agentic loop (Ask + Chat)
+    tool_bridge.go        Bridges MCP tools → Gemini function calls
+    tool_declarations.go  Gemini FunctionDeclaration schemas
+    system_prompt.go      Dynamic system prompt builder
+  mcp/                    MCP server implementation
+    server.go             Server wiring + stdio transport
+    domain/tools.go       MCP tool input types
+    handler/              Tool registrations
+    usecase/              Tool use case implementations
+  coverage/               Spec coverage analysis
+    parser.go             Spec file parser (markdown)
+    gemini_parser.go      AI-powered feature extraction
+    detector.go           Implementation detection engine
+    reporter.go           Report generators (text/json/md)
+```
 
-### Search Modes
+## Development
 
-- **`keyword`** (default) — PostgreSQL full-text search on symbol names and signatures
-- **`semantic`** — Vector similarity search (pgvector or Qdrant) using Gemini embeddings
-- **`hybrid`** — Combines keyword + semantic results
+```bash
+make build        # compile binary
+make run          # build + run
+make test         # run tests with race detector
+make lint         # run linter
+make docker-up    # start infrastructure
+make docker-down  # stop infrastructure
+make migrate      # run database migrations
+make clean        # remove build artifacts
+```
 
----
+<details>
+<summary><strong>Environment Variables</strong></summary>
 
-## 🗄️ Data Model
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_DSN` | `postgres://goatlas:goatlas@localhost:5432/goatlas` | PostgreSQL connection string |
+| `QDRANT_URL` | — (empty) | Qdrant gRPC endpoint. If set, uses Qdrant for vectors. If empty, uses pgvector |
+| `NEO4J_URL` | `bolt://localhost:7687` | Neo4j Bolt endpoint |
+| `NEO4J_USER` | `neo4j` | Neo4j username |
+| `NEO4J_PASS` | `goatlas_neo4j` | Neo4j password |
+| `GEMINI_API_KEY` | — | Google Gemini API key (required for AI features) |
+| `REPO_PATH` | — | Default repository path for indexing |
+| `HTTP_ADDR` | `:8080` | HTTP server listen address |
 
-### PostgreSQL Schema
+</details>
+
+<details>
+<summary><strong>Data Model</strong></summary>
+
+#### PostgreSQL Schema
 
 | Table | Purpose |
 |-------|---------|
@@ -271,123 +338,55 @@ GoAtlas exposes **10 MCP tools** via the stdio transport:
 | `imports` | Go import statements per file |
 | `symbol_embeddings` | Vector embeddings for semantic search (pgvector, 768-dim, HNSW index) |
 
-### Neo4j Graph Model
+#### Neo4j Graph Model
 
 ```
 (:Package)──[:CONTAINS]──>(:File)──[:DEFINES]──>(:Function)
                                   └──[:DEFINES]──>(:Type)
 (:Package)──[:IMPORTS]──>(:Package)
+(:Type)──[:IMPLEMENTS]──>(:Interface)
 ```
 
 Node types: **Package**, **File**, **Function**, **Type**
-Edge types: **CONTAINS**, **DEFINES**, **IMPORTS**
+Edge types: **CONTAINS**, **DEFINES**, **IMPORTS**, **IMPLEMENTS**
 
-### Vector Storage
-
-GoAtlas supports two vector backends via the `VectorStore` interface:
+#### Vector Storage
 
 | Backend | When Used | Storage |
 |---------|-----------|--------|
 | **pgvector** (default) | `QDRANT_URL` not set | PostgreSQL `symbol_embeddings` table with HNSW index |
 | **Qdrant** (optional) | `QDRANT_URL` is set | Qdrant `code_symbols` collection |
 
-- Embedding model: Gemini `text-embedding-004` (768 dimensions)
-- Distance metric: Cosine similarity
+Embedding model: Gemini `text-embedding-004` (768 dimensions), Cosine similarity
 
----
+</details>
 
-## 🤖 AI Agent Architecture
+## Roadmap
 
-The Gemini agent uses an **agentic tool-calling loop**:
+- [x] Phase 1 — AST indexing engine (Go + TypeScript)
+- [x] Phase 2 — PostgreSQL storage + pgvector embeddings
+- [x] Phase 3 — Neo4j knowledge graph
+- [x] Phase 4 — Gemini AI agent with tool-calling
+- [x] Phase 5 — MCP server (10 tools, stdio transport)
+- [x] Phase 6 — Spec coverage checker
+- [x] Phase 7 — Interactive chat mode
+- [x] Phase 8 — Python parser (tree-sitter)
+- [x] Phase 9 — Interface method resolution + IMPLEMENTS edges
+- [x] Phase 10 — Impact analysis + type flow tracing
+- [ ] Phase 11 — HTTP server mode (SSE transport)
+- [ ] Phase 12 — Dashboard UI
+- [ ] Phase 13 — Multi-repo support
 
-1. Receives user question + dynamic system prompt (includes repo summary, available tools)
-2. Gemini decides which MCP tools to call
-3. GoAtlas executes the tool calls against indexed data
-4. Results are fed back to Gemini
-5. Repeats up to **20 iterations** until Gemini provides a final answer
+## Contributing
 
-### Configuration
+Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `MaxIterations` | 20 | Max tool-call rounds |
-| `Model` | `gemini-2.0-flash` | Gemini model |
-| `Temperature` | 0.1 | Response determinism |
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'feat: Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
----
+## License
 
-## 📊 Spec Coverage Checker
-
-The coverage checker analyzes a feature specification document against the indexed codebase:
-
-1. **Parse** — Splits markdown spec into feature sections
-2. **Extract** — Uses Gemini AI (or regex fallback) to identify implementable components:
-   - API endpoints (`POST /users`)
-   - Service methods (`CreateUser`)
-   - UI screens (`UserListScreen`)
-3. **Detect** — Searches indexed symbols and endpoints for matches
-4. **Report** — Generates coverage report with status per feature:
-   - ✅ **Implemented** — All components found
-   - ⚠️ **Partial** — Some components found
-   - ❌ **Missing** — No components found
-
-Output formats: `text`, `json`, `markdown`
-
----
-
-## 🔨 Development
-
-```bash
-# Build binary
-make build
-
-# Run tests
-make test
-
-# Lint
-make lint
-
-# Stop infrastructure
-make docker-down
-
-# Clean built binary
-make clean
-```
-
----
-
-## ⚙️ Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_DSN` | `postgres://goatlas:goatlas@localhost:5432/goatlas` | PostgreSQL connection string |
-| `QDRANT_URL` | — (empty) | Qdrant gRPC endpoint. **If set**, uses Qdrant for vectors. **If empty** (default), uses pgvector |
-| `NEO4J_URL` | `bolt://localhost:7687` | Neo4j Bolt endpoint |
-| `NEO4J_USER` | `neo4j` | Neo4j username |
-| `NEO4J_PASS` | `goatlas_neo4j` | Neo4j password |
-| `GEMINI_API_KEY` | — | Google Gemini API key (required for AI features) |
-| `REPO_PATH` | — | Default repository path for indexing |
-| `HTTP_ADDR` | `:8080` | HTTP server listen address |
-
----
-
-## 📦 Key Dependencies
-
-| Dependency | Purpose |
-|------------|---------|
-| `github.com/spf13/cobra` | CLI framework |
-| `github.com/spf13/viper` | Configuration management |
-| `github.com/jackc/pgx/v5` | PostgreSQL driver & connection pooling |
-| `github.com/pressly/goose/v3` | Database migrations |
-| `github.com/mark3labs/mcp-go` | MCP server SDK |
-| `github.com/google/generative-ai-go` | Gemini AI client |
-| `github.com/pgvector/pgvector-go` | pgvector (PostgreSQL vector extension) client |
-| `github.com/qdrant/go-client` | Qdrant vector DB client (optional backend) |
-| `github.com/neo4j/neo4j-go-driver/v5` | Neo4j graph DB driver |
-| `google.golang.org/api` | Google APIs support |
-
----
-
-## 📜 License
-
-Internal project — All rights reserved.
+MIT
