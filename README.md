@@ -202,6 +202,28 @@ go run . embed --force  # Force re-embed everything
 go run . build-graph    # Populate Neo4j graph
 ```
 
+### 7. (Optional) Auto-Index via Git Hook
+
+Set up git hooks to automatically re-index when your working tree changes (after checkout, merge, or rebase):
+
+```bash
+# Create the hook script
+cat > /path/to/your/repo/.git/hooks/post-merge << 'EOF'
+#!/bin/sh
+echo "[GoAtlas] Auto-indexing after merge..."
+goatlas index "$(git rev-parse --show-toplevel)" &
+EOF
+
+# Reuse for other hooks
+cp /path/to/your/repo/.git/hooks/post-merge /path/to/your/repo/.git/hooks/post-checkout
+cp /path/to/your/repo/.git/hooks/post-merge /path/to/your/repo/.git/hooks/post-rewrite
+
+# Make executable
+chmod +x /path/to/your/repo/.git/hooks/post-*
+```
+
+> **Tip:** The `&` runs indexing in the background so it doesn't block your git workflow. If you also want to rebuild embeddings or the graph, append `goatlas embed &` or `goatlas build-graph &` to the hook script.
+
 ## Usage
 
 **Single-Shot Question:**
