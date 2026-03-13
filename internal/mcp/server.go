@@ -37,7 +37,7 @@ func NewServer(cfg ServerConfig) *Server {
 
 	h := handler.NewMCPHandler(
 		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher, cfg.RepoRoot),
-		usecase.NewReadFileUseCase(cfg.RepoRoot),
+		usecase.NewReadFileUseCase(cfg.Pool),
 		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo, cfg.RepoRoot),
 		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo, cfg.IndexerSvc.IIRepo),
 		usecase.NewListEndpointsUseCase(cfg.IndexerSvc.EndpointRepo),

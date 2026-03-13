@@ -8,22 +8,43 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ReadFileUseCase reads a file from the repository root with optional line range.
+// ReadFileUseCase reads a file from any indexed repository with optional line range.
+// It resolves the file path by looking up the repository root from the database,
+// supporting multi-repo setups where files may belong to different repositories.
 type ReadFileUseCase struct {
-	RepoRoot string
+	pool *pgxpool.Pool
 }
 
 // NewReadFileUseCase constructs a ReadFileUseCase.
-func NewReadFileUseCase(repoRoot string) *ReadFileUseCase {
-	return &ReadFileUseCase{RepoRoot: repoRoot}
+func NewReadFileUseCase(pool *pgxpool.Pool) *ReadFileUseCase {
+	return &ReadFileUseCase{pool: pool}
 }
 
-// Execute reads the file at path (relative to RepoRoot) and returns the content with line numbers.
-func (uc *ReadFileUseCase) Execute(_ context.Context, path string, startLine, endLine int) (string, error) {
-	clean := filepath.Clean(filepath.Join(uc.RepoRoot, path))
-	if !strings.HasPrefix(clean, uc.RepoRoot) {
+// Execute reads the file at the given relative path and returns the content with line numbers.
+// It looks up the repository root from the database by matching the path against indexed files.
+func (uc *ReadFileUseCase) Execute(ctx context.Context, path string, startLine, endLine int) (string, error) {
+	// Look up the file path and its repository's absolute root from the DB.
+	var repoPath, filePath string
+	err := uc.pool.QueryRow(ctx, `
+		SELECT r.path, f.path
+		FROM files f
+		JOIN repositories r ON r.id = f.repo_id
+		WHERE f.path = $1
+		LIMIT 1
+	`, path).Scan(&repoPath, &filePath)
+	if err != nil {
+		return "", fmt.Errorf("file %q not found in index: %w", path, err)
+	}
+
+	absPath := filepath.Join(repoPath, filePath)
+	clean := filepath.Clean(absPath)
+
+	// Safety check: ensure resolved path is within the repo root.
+	if !strings.HasPrefix(clean, filepath.Clean(repoPath)) {
 		return "", errors.New("path outside repo root")
 	}
 

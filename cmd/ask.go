@@ -49,7 +49,7 @@ var askCmd = &cobra.Command{
 
 		uc := &agent.UseCases{
 			SearchCode:     mcpusecase.NewSearchCodeUseCase(indexerSvc.SymbolRepo, nil, cfg.RepoPath),
-			ReadFile:       mcpusecase.NewReadFileUseCase(cfg.RepoPath),
+			ReadFile:       mcpusecase.NewReadFileUseCase(pool),
 			FindSymbol:     mcpusecase.NewFindSymbolUseCase(indexerSvc.SymbolRepo, cfg.RepoPath),
 			FindCallers:    mcpusecase.NewFindCallersUseCase(indexerSvc.SymbolRepo, indexerSvc.IIRepo),
 			ListEndpoints:  mcpusecase.NewListEndpointsUseCase(indexerSvc.EndpointRepo),
