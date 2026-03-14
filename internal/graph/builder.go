@@ -339,7 +339,7 @@ func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResul
 // from the function_calls table.
 func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT fc.caller_qualified, fc.callee_name, fc.callee_qualified, fc.line
+		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line
 		FROM function_calls fc
 	`)
 	if err != nil {
