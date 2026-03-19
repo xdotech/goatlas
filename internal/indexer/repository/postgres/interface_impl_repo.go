@@ -26,11 +26,11 @@ func (r *InterfaceImplRepo) BulkInsert(ctx context.Context, impls []domain.Inter
 	}
 	rows := make([][]interface{}, len(impls))
 	for i, impl := range impls {
-		rows[i] = []interface{}{impl.FileID, impl.InterfaceName, impl.StructName, impl.MethodName}
+		rows[i] = []interface{}{impl.FileID, impl.InterfaceName, impl.StructName, impl.MethodName, impl.Confidence}
 	}
 	_, err := r.pool.CopyFrom(ctx,
 		pgx.Identifier{"interface_impls"},
-		[]string{"file_id", "interface_name", "struct_name", "method_name"},
+		[]string{"file_id", "interface_name", "struct_name", "method_name", "confidence"},
 		pgx.CopyFromRows(rows),
 	)
 	return err
@@ -44,7 +44,7 @@ func (r *InterfaceImplRepo) DeleteByFileID(ctx context.Context, fileID int64) er
 
 // FindImplementations returns struct methods that implement the given interface method.
 func (r *InterfaceImplRepo) FindImplementations(ctx context.Context, interfaceName, methodName string) ([]domain.InterfaceImpl, error) {
-	query := `SELECT id, file_id, interface_name, struct_name, method_name
+	query := `SELECT id, file_id, interface_name, struct_name, method_name, COALESCE(confidence, 0.85)
 	           FROM interface_impls WHERE 1=1`
 	args := []interface{}{}
 	argN := 1
@@ -70,7 +70,7 @@ func (r *InterfaceImplRepo) FindImplementations(ctx context.Context, interfaceNa
 	var impls []domain.InterfaceImpl
 	for rows.Next() {
 		var impl domain.InterfaceImpl
-		if err := rows.Scan(&impl.ID, &impl.FileID, &impl.InterfaceName, &impl.StructName, &impl.MethodName); err != nil {
+		if err := rows.Scan(&impl.ID, &impl.FileID, &impl.InterfaceName, &impl.StructName, &impl.MethodName, &impl.Confidence); err != nil {
 			return nil, err
 		}
 		impls = append(impls, impl)

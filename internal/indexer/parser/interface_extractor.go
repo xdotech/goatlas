@@ -101,15 +101,20 @@ func ExtractInterfaceImpls(filePath string) ([]domain.InterfaceImpl, error) {
 					matchCount++
 				}
 			}
-			// Only record if the struct implements ALL interface methods
+			// Determine confidence based on match completeness
+			var confidence float64
 			if matchCount == len(iface.methods) {
-				for _, im := range iface.methods {
-					impls = append(impls, domain.InterfaceImpl{
-						InterfaceName: pkgName + "." + iface.name,
-						StructName:    pkgName + ".(" + recv + ")",
-						MethodName:    im,
-					})
-				}
+				confidence = 0.85 // same-file, all methods matched
+			} else {
+				continue // skip partial matches in same-file mode
+			}
+			for _, im := range iface.methods {
+				impls = append(impls, domain.InterfaceImpl{
+					InterfaceName: pkgName + "." + iface.name,
+					StructName:    pkgName + ".(" + recv + ")",
+					MethodName:    im,
+					Confidence:    confidence,
+				})
 			}
 		}
 	}

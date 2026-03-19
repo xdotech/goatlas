@@ -36,3 +36,8 @@ type ListEndpointsInput struct {
 type GetFileSymbolsInput struct {
 	Path string
 }
+
+// CheckStalenessInput for check_staleness tool.
+type CheckStalenessInput struct {
+	Repo string // optional repo name, defaults to first indexed repo
+}

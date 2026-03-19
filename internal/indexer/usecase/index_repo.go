@@ -57,7 +57,9 @@ func NewIndexRepoUseCase(
 }
 
 // Execute walks the repository at absPath, parses files, and stores results.
-func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force bool) (map[string]any, error) {
+// When incremental is true and force is false, only files changed since the last
+// indexed commit are processed.
+func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, incremental bool) (map[string]any, error) {
 	absPath, err := filepath.Abs(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("abs path: %w", err)
@@ -69,7 +71,7 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 	// Load detection patterns from goatlas.yaml (or embedded defaults)
 	patternCfg, _ := parser.LoadPatterns(absPath)
 
-	// Upsert the repository record
+	// Upsert the repository record; scans back existing last_commit from DB.
 	repo := &domain.Repository{
 		Name: repoName,
 		Path: absPath,
@@ -86,45 +88,98 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 	}
 
 	stats := map[string]int{
-		"files_indexed":  0,
-		"files_skipped":  0,
-		"symbols":        0,
-		"endpoints":      0,
-		"imports":        0,
-		"connections":    0,
+		"files_indexed": 0,
+		"files_skipped": 0,
+		"symbols":       0,
+		"endpoints":     0,
+		"imports":       0,
+		"connections":   0,
 	}
 
 	var allConns []domain.ServiceConnection
 
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable
-		}
-		if info.IsDir() {
-			base := info.Name()
-			if base == "vendor" || base == "node_modules" || base == ".git" || base == "testdata" ||
-				base == "__pycache__" || base == ".venv" || base == "venv" || base == ".tox" || base == ".eggs" {
-				return filepath.SkipDir
+	// Get current HEAD commit for incremental logic and final update.
+	headCommit, _ := GetHeadCommit(absPath)
+
+	// Determine which files to process (nil = full walk).
+	type fileAction struct {
+		path    string
+		deleted bool
+	}
+	var targetFiles []fileAction
+
+	if incremental && !force && repo.LastCommit != "" && headCommit != "" && headCommit != repo.LastCommit {
+		if commitExists(absPath, repo.LastCommit) {
+			added, modified, deleted, diffErr := GetChangedFiles(absPath, repo.LastCommit, headCommit)
+			if diffErr == nil {
+				for _, p := range added {
+					targetFiles = append(targetFiles, fileAction{path: p})
+				}
+				for _, p := range modified {
+					targetFiles = append(targetFiles, fileAction{path: p})
+				}
+				for _, p := range deleted {
+					targetFiles = append(targetFiles, fileAction{path: p, deleted: true})
+				}
+				slog.Info("incremental index", "changed", len(added)+len(modified), "deleted", len(deleted))
 			}
-			return nil
+			// if diffErr != nil: fall through to full walk (targetFiles stays nil)
 		}
+	}
 
-		ext := strings.ToLower(filepath.Ext(path))
-		relPath, _ := filepath.Rel(absPath, path)
-
-		switch ext {
-		case ".go":
-			return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns, patternCfg)
-		case ".tsx", ".ts", ".jsx", ".js":
-			return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats, &allConns, patternCfg)
-		case ".py":
-			return uc.indexPythonFile(ctx, repo.ID, absPath, relPath, force, stats)
-		default:
-			return nil
+	if targetFiles != nil {
+		for _, fa := range targetFiles {
+			if fa.deleted {
+				if err := uc.fileRepo.DeleteByPath(ctx, repo.ID, fa.path); err != nil {
+					slog.Warn("incremental: delete file failed", "path", fa.path, "error", err)
+				}
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(fa.path))
+			var indexErr error
+			switch ext {
+			case ".go":
+				indexErr = uc.indexGoFile(ctx, repo.ID, absPath, fa.path, modulePath, force, stats, &allConns, patternCfg)
+			case ".tsx", ".ts", ".jsx", ".js":
+				indexErr = uc.indexJSFile(ctx, repo.ID, absPath, fa.path, force, stats, &allConns, patternCfg)
+			case ".py":
+				indexErr = uc.indexPythonFile(ctx, repo.ID, absPath, fa.path, force, stats)
+			}
+			if indexErr != nil {
+				slog.Warn("incremental: index file failed", "path", fa.path, "error", indexErr)
+			}
 		}
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk: %w", err)
+	} else {
+		err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // skip unreadable
+			}
+			if info.IsDir() {
+				base := info.Name()
+				if base == "vendor" || base == "node_modules" || base == ".git" || base == "testdata" ||
+					base == "__pycache__" || base == ".venv" || base == "venv" || base == ".tox" || base == ".eggs" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			ext := strings.ToLower(filepath.Ext(path))
+			relPath, _ := filepath.Rel(absPath, path)
+
+			switch ext {
+			case ".go":
+				return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns, patternCfg)
+			case ".tsx", ".ts", ".jsx", ".js":
+				return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats, &allConns, patternCfg)
+			case ".py":
+				return uc.indexPythonFile(ctx, repo.ID, absPath, relPath, force, stats)
+			default:
+				return nil
+			}
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk: %w", err)
+		}
 	}
 
 	// Bulk insert all detected connections
@@ -135,10 +190,15 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force b
 		stats["connections"] = len(allConns)
 	}
 
-	// Update repo last indexed time
+	// Update repo last indexed time via second upsert (safe: doesn't overwrite last_commit).
 	now := time.Now()
 	repo.LastIndexedAt = &now
 	_ = uc.repoRepo.Upsert(ctx, repo)
+
+	// Persist the current HEAD commit so future incremental runs can diff from here.
+	if headCommit != "" {
+		_ = uc.repoRepo.UpdateLastCommit(ctx, repo.ID, headCommit)
+	}
 
 	result := map[string]any{
 		"status":     "ok",

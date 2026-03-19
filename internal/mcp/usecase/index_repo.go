@@ -19,12 +19,12 @@ func NewIndexRepoUseCase(svc *indexer.Service) *IndexRepoUseCase {
 }
 
 // Execute indexes the given repository path.
-func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force bool) (string, error) {
+func (uc *IndexRepoUseCase) Execute(ctx context.Context, repoPath string, force, incremental bool) (string, error) {
 	if repoPath == "" {
 		return "", fmt.Errorf("repo path is required")
 	}
 
-	result, err := uc.svc.IndexRepo.Execute(ctx, repoPath, force)
+	result, err := uc.svc.IndexRepo.Execute(ctx, repoPath, force, incremental)
 	if err != nil {
 		return "", err
 	}

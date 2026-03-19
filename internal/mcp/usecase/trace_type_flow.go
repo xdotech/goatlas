@@ -80,7 +80,7 @@ func (uc *TraceTypeFlowUseCase) Execute(ctx context.Context, typeName, direction
 			for _, cons := range consumers {
 				if prod.SymbolName != cons.SymbolName {
 					// Check if producer calls consumer (or vice versa)
-					callers, _ := uc.querier.FindCallers(ctx, cons.SymbolName, 3)
+					callers, _ := uc.querier.FindCallers(ctx, cons.SymbolName, 3, 0.0)
 					for _, c := range callers {
 						if c.QualifiedName == prod.SymbolName || c.Name == prod.SymbolName {
 							fmt.Fprintf(&sb, "   %s → %s (depth %d)\n", prod.SymbolName, cons.SymbolName, c.Depth)

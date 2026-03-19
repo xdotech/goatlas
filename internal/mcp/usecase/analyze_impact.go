@@ -52,7 +52,7 @@ func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxD
 		if len(direct) > 0 {
 			fmt.Fprintf(&sb, "Direct callers (depth 1): %d\n", len(direct))
 			for _, c := range direct {
-				fmt.Fprintf(&sb, "  - %s", c.QualifiedName)
+				fmt.Fprintf(&sb, "  - [conf %.2f] %s", c.Confidence, c.QualifiedName)
 				if c.File != "" {
 					fmt.Fprintf(&sb, " @ %s:%d", c.File, c.Line)
 				}
@@ -64,7 +64,7 @@ func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxD
 		if len(transitive) > 0 {
 			fmt.Fprintf(&sb, "Transitive callers (depth 2-%d): %d\n", maxDepth, len(transitive))
 			for _, c := range transitive {
-				fmt.Fprintf(&sb, "  - [depth %d] %s", c.Depth, c.QualifiedName)
+				fmt.Fprintf(&sb, "  - [depth %d, conf %.2f] %s", c.Depth, c.Confidence, c.QualifiedName)
 				if c.File != "" {
 					fmt.Fprintf(&sb, " @ %s:%d", c.File, c.Line)
 				}

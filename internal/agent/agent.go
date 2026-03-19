@@ -134,3 +134,33 @@ func (a *Agent) runLoop(ctx context.Context, session *genai.ChatSession, input s
 func (a *Agent) buildToolDefinitions() []*genai.Tool {
 	return []*genai.Tool{{FunctionDeclarations: toolDeclarations()}}
 }
+
+// GenerateDoc makes a one-shot Gemini call (no tool loop) with a custom system
+// prompt. Used for generating documentation, SKILL.md, and wiki content.
+func (a *Agent) GenerateDoc(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	temp := a.cfg.Temperature
+	model := a.client.GenerativeModel(a.cfg.Model)
+	model.Temperature = &temp
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text(systemPrompt)},
+		Role:  "system",
+	}
+	// No tools — pure text generation
+
+	resp, err := model.GenerateContent(ctx, genai.Text(userPrompt))
+	if err != nil {
+		return "", fmt.Errorf("gemini generate: %w", err)
+	}
+	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+		return "", fmt.Errorf("no response from model")
+	}
+
+	var parts []string
+	for _, p := range resp.Candidates[0].Content.Parts {
+		if t, ok := p.(genai.Text); ok {
+			parts = append(parts, string(t))
+		}
+	}
+	return strings.Join(parts, "\n"), nil
+}
+

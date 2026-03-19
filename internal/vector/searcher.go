@@ -49,3 +49,17 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int, serviceF
 	}
 	return sb.String(), nil
 }
+
+// SearchStructured embeds the query and returns structured nearest-neighbour results.
+// This is used by hybrid search for RRF merging.
+func (s *Searcher) SearchStructured(ctx context.Context, query string, limit int, serviceFilter string) ([]SearchResult, error) {
+	vec, err := s.embedder.EmbedOne(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	filter := map[string]string{}
+	if serviceFilter != "" {
+		filter["service"] = serviceFilter
+	}
+	return s.store.Search(ctx, vec, limit, filter)
+}

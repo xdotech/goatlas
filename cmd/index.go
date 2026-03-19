@@ -13,6 +13,7 @@ import (
 )
 
 var indexForce bool
+var indexIncremental bool
 
 var indexCmd = &cobra.Command{
 	Use:   "index <repo-path>",
@@ -34,7 +35,7 @@ var indexCmd = &cobra.Command{
 		defer pool.Close()
 
 		svc := indexer.NewService(pool)
-		result, err := svc.IndexRepo.Execute(ctx, repoPath, indexForce)
+		result, err := svc.IndexRepo.Execute(ctx, repoPath, indexForce, indexIncremental)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return err
@@ -48,4 +49,5 @@ var indexCmd = &cobra.Command{
 
 func init() {
 	indexCmd.Flags().BoolVarP(&indexForce, "force", "f", false, "Force re-index all files")
+	indexCmd.Flags().BoolVarP(&indexIncremental, "incremental", "i", false, "Only re-index files changed since last commit")
 }

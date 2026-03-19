@@ -64,27 +64,31 @@ func ExtractFunctionCalls(filePath string) ([]domain.FunctionCall, error) {
 
 			switch fun := call.Fun.(type) {
 			case *ast.Ident:
-				// Direct function call: funcName(...)
+				// Direct function call: funcName(...) — high confidence (same package)
 				calls = append(calls, domain.FunctionCall{
 					CallerQualifiedName: callerQName,
 					CalleeName:          fun.Name,
 					CalleePackage:       pkgName,
 					Line:                pos.Line,
 					Col:                 pos.Column,
+					Confidence:          0.90,
 				})
 
 			case *ast.SelectorExpr:
 				// Method or package call: pkg.Func() or obj.Method()
 				calleeName := fun.Sel.Name
 				calleePkg := ""
+				confidence := 0.50 // default: ambiguous variable receiver
 
 				if ident, ok := fun.X.(*ast.Ident); ok {
 					// Could be: pkg.Func() or variable.Method()
 					if _, isImport := importAliases[ident.Name]; isImport {
 						calleePkg = ident.Name
+						confidence = 0.80 // known import alias resolved
 					} else {
 						// It's a method call on a variable — use the variable name as context
 						calleePkg = ident.Name
+						confidence = 0.50 // ambiguous receiver
 					}
 				}
 
@@ -94,6 +98,7 @@ func ExtractFunctionCalls(filePath string) ([]domain.FunctionCall, error) {
 					CalleePackage:       calleePkg,
 					Line:                pos.Line,
 					Col:                 pos.Column,
+					Confidence:          confidence,
 				})
 			}
 

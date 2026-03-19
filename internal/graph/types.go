@@ -50,6 +50,7 @@ type CallerResult struct {
 	File          string
 	Line          int
 	Depth         int
+	Confidence    float64
 }
 
 // AffectedEndpoint represents an API endpoint affected by a code change.

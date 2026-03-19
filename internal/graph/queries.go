@@ -68,29 +68,41 @@ func (q *Querier) GetAPIHandlers(ctx context.Context, endpointPattern string) ([
 
 // FindCallers returns functions that call the target function, using recursive
 // CALLS edges in the Neo4j graph (variable-length paths up to depth).
-func (q *Querier) FindCallers(ctx context.Context, functionName string, depth int) ([]CallerResult, error) {
+// minConfidence filters edges below the threshold (0.0 = no filter).
+func (q *Querier) FindCallers(ctx context.Context, functionName string, depth int, minConfidence float64) ([]CallerResult, error) {
 	if depth <= 0 {
 		depth = 5
+	}
+
+	// Build confidence filter clause
+	confFilter := ""
+	if minConfidence > 0 {
+		confFilter = fmt.Sprintf("AND ALL(r IN relationships(path) WHERE r.confidence >= %f)", minConfidence)
 	}
 
 	// First try recursive CALLS-based query (includes IMPLEMENTS traversal)
 	records, err := q.client.QueryNodes(ctx, fmt.Sprintf(`
 		MATCH path = (caller:Function)-[:CALLS*1..%d]->(target:Function)
-		WHERE target.name = $name OR target.qualified CONTAINS $name
+		WHERE (target.name = $name OR target.qualified CONTAINS $name)
+		%s
+		WITH caller, path,
+		     REDUCE(minConf = 1.0, r IN relationships(path) | CASE WHEN r.confidence < minConf THEN r.confidence ELSE minConf END) AS pathConf
 		RETURN DISTINCT caller.name AS name, caller.qualified AS qualified,
 		       caller.file AS file, caller.line AS line,
-		       length(path) AS depth
+		       length(path) AS depth, pathConf AS confidence
 		UNION
 		MATCH (target:Function)-[:IMPLEMENTS]->(iface:Type)<-[:IMPLEMENTS]-(impl:Function)
 		WHERE target.name = $name OR target.qualified CONTAINS $name
 		WITH impl
 		MATCH path = (caller:Function)-[:CALLS*1..%d]->(impl)
+		WITH caller, path,
+		     REDUCE(minConf = 1.0, r IN relationships(path) | CASE WHEN r.confidence < minConf THEN r.confidence ELSE minConf END) AS pathConf
 		RETURN DISTINCT caller.name AS name, caller.qualified AS qualified,
 		       caller.file AS file, caller.line AS line,
-		       length(path) + 1 AS depth
-		ORDER BY depth, name
+		       length(path) + 1 AS depth, pathConf AS confidence
+		ORDER BY confidence DESC, depth, name
 		LIMIT 50
-	`, depth, depth), map[string]any{"name": functionName})
+	`, depth, confFilter, depth), map[string]any{"name": functionName})
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +122,7 @@ func (q *Querier) FindCallers(ctx context.Context, functionName string, depth in
 
 	var results []CallerResult
 	for _, r := range records {
-		cr := CallerResult{Depth: 1}
+		cr := CallerResult{Depth: 1, Confidence: 0.5}
 		if v, ok := r["name"].(string); ok {
 			cr.Name = v
 		}
@@ -125,6 +137,9 @@ func (q *Querier) FindCallers(ctx context.Context, functionName string, depth in
 		}
 		if v, ok := r["depth"].(int64); ok {
 			cr.Depth = int(v)
+		}
+		if v, ok := r["confidence"].(float64); ok {
+			cr.Confidence = v
 		}
 		results = append(results, cr)
 	}
@@ -152,7 +167,7 @@ func (q *Querier) FormatCallers(functionName string, callers []CallerResult) str
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Graph callers/references for %q:\n\n", functionName))
 	for _, c := range callers {
-		sb.WriteString(fmt.Sprintf("  [depth %d] %s", c.Depth, c.QualifiedName))
+		sb.WriteString(fmt.Sprintf("  [depth %d, conf %.2f] %s", c.Depth, c.Confidence, c.QualifiedName))
 		if c.File != "" {
 			sb.WriteString(fmt.Sprintf(" @ %s:%d", c.File, c.Line))
 		}
@@ -166,8 +181,8 @@ func (q *Querier) FormatCallers(functionName string, callers []CallerResult) str
 func (q *Querier) AnalyzeImpact(ctx context.Context, symbol string, maxDepth int) (*ImpactReport, error) {
 	report := &ImpactReport{}
 
-	// 1. Find all transitive callers via CALLS edges
-	callers, err := q.FindCallers(ctx, symbol, maxDepth)
+	// 1. Find all transitive callers via CALLS edges (no confidence filter for impact — show all)
+	callers, err := q.FindCallers(ctx, symbol, maxDepth, 0.0)
 	if err != nil {
 		return nil, fmt.Errorf("find callers: %w", err)
 	}

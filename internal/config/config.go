@@ -16,6 +16,7 @@ type Config struct {
 	Neo4jPass    string
 	GeminiAPIKey string
 	HTTPAddr     string
+	RRFK         int // RRF constant k (default 60)
 }
 
 // Load reads configuration from environment variables and optional .env file.
@@ -31,6 +32,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("NEO4J_USER", "neo4j")
 	viper.SetDefault("NEO4J_PASS", "goatlas_neo4j")
 	viper.SetDefault("HTTP_ADDR", ":8080")
+	viper.SetDefault("GOATLAS_RRF_K", 60)
 
 	_ = viper.ReadInConfig() // ignore missing .env file
 
@@ -48,5 +50,6 @@ func Load() (*Config, error) {
 		Neo4jPass:    viper.GetString("NEO4J_PASS"),
 		GeminiAPIKey: viper.GetString("GEMINI_API_KEY"),
 		HTTPAddr:     viper.GetString("HTTP_ADDR"),
+		RRFK:         viper.GetInt("GOATLAS_RRF_K"),
 	}, nil
 }

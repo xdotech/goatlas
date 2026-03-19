@@ -51,3 +51,9 @@ func (r *FileRepo) DeleteByID(ctx context.Context, id int64) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM files WHERE id = $1`, id)
 	return err
 }
+
+// DeleteByPath removes the file record for the given repo and relative path.
+func (r *FileRepo) DeleteByPath(ctx context.Context, repoID int64, path string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM files WHERE repo_id = $1 AND path = $2`, repoID, path)
+	return err
+}

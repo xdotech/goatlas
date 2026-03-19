@@ -19,18 +19,24 @@ func NewRepoRepo(pool *pgxpool.Pool) *RepoRepo {
 	return &RepoRepo{pool: pool}
 }
 
-// Upsert inserts or updates a repository record and sets r.ID from the returned id.
+// Upsert inserts or updates a repository record. On conflict, preserves the
+// existing last_commit value and scans it back into r so callers can see it.
 func (rr *RepoRepo) Upsert(ctx context.Context, r *domain.Repository) error {
 	row := rr.pool.QueryRow(ctx, `
 		INSERT INTO repositories (name, path, last_indexed_at, last_commit)
 		VALUES ($1, $2, now(), $3)
 		ON CONFLICT (name) DO UPDATE
 			SET path = EXCLUDED.path,
-			    last_indexed_at = now(),
-			    last_commit = EXCLUDED.last_commit
-		RETURNING id
+			    last_indexed_at = now()
+		RETURNING id, last_commit
 	`, r.Name, r.Path, r.LastCommit)
-	return row.Scan(&r.ID)
+	return row.Scan(&r.ID, &r.LastCommit)
+}
+
+// UpdateLastCommit sets the last indexed commit hash for the given repository.
+func (rr *RepoRepo) UpdateLastCommit(ctx context.Context, repoID int64, commit string) error {
+	_, err := rr.pool.Exec(ctx, `UPDATE repositories SET last_commit = $1 WHERE id = $2`, commit, repoID)
+	return err
 }
 
 // GetByName returns the repository with the given name, or nil if not found.

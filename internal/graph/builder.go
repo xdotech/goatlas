@@ -339,7 +339,8 @@ func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResul
 // from the function_calls table.
 func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line
+		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line,
+		       COALESCE(fc.confidence, 0.5)
 		FROM function_calls fc
 	`)
 	if err != nil {
@@ -351,7 +352,8 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 		var callerQName, calleeName string
 		var calleeQualified *string
 		var line int
-		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line); err != nil {
+		var confidence float64
+		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line, &confidence); err != nil {
 			return err
 		}
 
@@ -365,13 +367,14 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 			MATCH (callee:Function)
 			WHERE callee.qualified = $callee_qualified
 			   OR callee.name = $callee_name
-			MERGE (caller)-[:CALLS {line: $line}]->(callee)
+			MERGE (caller)-[:CALLS {line: $line, confidence: $conf}]->(callee)
 		`
 		params := map[string]any{
 			"caller":           callerQName,
 			"callee_qualified": cq,
 			"callee_name":      calleeName,
 			"line":             line,
+			"conf":             confidence,
 		}
 		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
 			return err
@@ -401,22 +404,24 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 			return err
 		}
 
-		var edgeType string
+		var cypher string
 		switch direction {
 		case "input":
-			edgeType = "ACCEPTS"
+			cypher = `
+				MATCH (fn:Function)
+				WHERE fn.qualified = $symbol OR fn.name = $symbol
+				MERGE (t:Type {name: $type_name})
+				MERGE (fn)-[:ACCEPTS {pos: $pos}]->(t)`
 		case "output":
-			edgeType = "RETURNS"
+			cypher = `
+				MATCH (fn:Function)
+				WHERE fn.qualified = $symbol OR fn.name = $symbol
+				MERGE (t:Type {name: $type_name})
+				MERGE (fn)-[:RETURNS {pos: $pos}]->(t)`
 		default:
 			continue
 		}
 
-		cypher := fmt.Sprintf(`
-			MATCH (fn:Function)
-			WHERE fn.qualified = $symbol OR fn.name = $symbol
-			MERGE (t:Type {name: $type_name})
-			MERGE (fn)-[:%s {pos: $pos}]->(t)
-		`, edgeType)
 		params := map[string]any{
 			"symbol":    symbolName,
 			"type_name": typeName,
@@ -434,7 +439,7 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 // and interface (Type) nodes, using data from the interface_impls table.
 func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT interface_name, struct_name, method_name
+		SELECT interface_name, struct_name, method_name, COALESCE(confidence, 0.85)
 		FROM interface_impls
 	`)
 	if err != nil {
@@ -444,7 +449,8 @@ func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult)
 
 	for rows.Next() {
 		var interfaceName, structName, methodName string
-		if err := rows.Scan(&interfaceName, &structName, &methodName); err != nil {
+		var confidence float64
+		if err := rows.Scan(&interfaceName, &structName, &methodName, &confidence); err != nil {
 			return err
 		}
 
@@ -452,12 +458,13 @@ func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult)
 			MATCH (fn:Function)
 			WHERE fn.qualified CONTAINS $struct_name AND fn.name = $method
 			MERGE (iface:Type {name: $iface_name})
-			MERGE (fn)-[:IMPLEMENTS {method: $method}]->(iface)
+			MERGE (fn)-[:IMPLEMENTS {method: $method, confidence: $conf}]->(iface)
 		`
 		params := map[string]any{
 			"struct_name": structName,
 			"method":      methodName,
 			"iface_name":  interfaceName,
+			"conf":        confidence,
 		}
 		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
 			return err

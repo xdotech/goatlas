@@ -6,9 +6,10 @@ import "context"
 type InterfaceImpl struct {
 	ID            int64
 	FileID        int64
-	InterfaceName string // e.g. "CompetitorKeywordRepository"
-	StructName    string // e.g. "competitorKeywordRepo"
-	MethodName    string // e.g. "FindKeywordsByCompetitorId"
+	InterfaceName string  // e.g. "CompetitorKeywordRepository"
+	StructName    string  // e.g. "competitorKeywordRepo"
+	MethodName    string  // e.g. "FindKeywordsByCompetitorId"
+	Confidence    float64 // 0.0-1.0 confidence score
 }
 
 // InterfaceImplRepository handles persistence of interface implementation records.

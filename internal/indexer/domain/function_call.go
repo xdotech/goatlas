@@ -6,11 +6,12 @@ import "context"
 type FunctionCall struct {
 	ID                  int64
 	FileID              int64
-	CallerQualifiedName string // e.g. "handler.(ReceiveHandler).Handle"
-	CalleeName          string // e.g. "ProcessReceive"
-	CalleePackage       string // e.g. "service" (import alias or pkg name)
+	CallerQualifiedName string  // e.g. "handler.(ReceiveHandler).Handle"
+	CalleeName          string  // e.g. "ProcessReceive"
+	CalleePackage       string  // e.g. "service" (import alias or pkg name)
 	Line                int
 	Col                 int
+	Confidence          float64 // 0.0-1.0 confidence score based on evidence quality
 }
 
 // FunctionCallRepository handles persistence of function call records.

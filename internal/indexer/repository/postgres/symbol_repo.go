@@ -150,6 +150,44 @@ func (r *SymbolRepo) SearchWithFile(ctx context.Context, query string, limit int
 	return results, rows.Err()
 }
 
+// SearchRanked performs full-text search and returns symbols with 1-based BM25 rank for RRF.
+func (r *SymbolRepo) SearchRanked(ctx context.Context, query string, limit int, kind string) ([]domain.SymbolWithRank, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	base := `
+		SELECT s.id, s.file_id, s.kind, s.name, s.qualified_name, s.signature,
+		       s.receiver, s.line, s.col, s.doc_comment, f.path,
+		       cast(row_number() OVER (ORDER BY ts_rank(s.search_vector, plainto_tsquery('english', $1)) DESC) AS int) AS rank
+		FROM symbols s
+		JOIN files f ON s.file_id = f.id
+		WHERE s.search_vector @@ plainto_tsquery('english', $1)`
+	var rows pgx.Rows
+	var err error
+	if kind != "" {
+		rows, err = r.pool.Query(ctx, base+` AND s.kind = $3 LIMIT $2`, query, limit, kind)
+	} else {
+		rows, err = r.pool.Query(ctx, base+` LIMIT $2`, query, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.SymbolWithRank
+	for rows.Next() {
+		var sw domain.SymbolWithRank
+		if err := rows.Scan(
+			&sw.ID, &sw.FileID, &sw.Kind, &sw.Name, &sw.QualifiedName,
+			&sw.Signature, &sw.Receiver, &sw.Line, &sw.Col, &sw.DocComment,
+			&sw.FilePath, &sw.Rank,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, sw)
+	}
+	return results, rows.Err()
+}
+
 func scanSymbols(rows pgx.Rows) ([]domain.Symbol, error) {
 	var symbols []domain.Symbol
 	for rows.Next() {

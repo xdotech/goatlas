@@ -25,11 +25,11 @@ func (r *FunctionCallRepo) BulkInsert(ctx context.Context, calls []domain.Functi
 	}
 	rows := make([][]interface{}, len(calls))
 	for i, c := range calls {
-		rows[i] = []interface{}{c.FileID, c.CallerQualifiedName, c.CalleeName, c.CalleePackage, c.Line, c.Col}
+		rows[i] = []interface{}{c.FileID, c.CallerQualifiedName, c.CalleeName, c.CalleePackage, c.Line, c.Col, c.Confidence}
 	}
 	_, err := r.pool.CopyFrom(ctx,
 		pgx.Identifier{"function_calls"},
-		[]string{"file_id", "caller_qualified_name", "callee_name", "callee_package", "line", "col"},
+		[]string{"file_id", "caller_qualified_name", "callee_name", "callee_package", "line", "col", "confidence"},
 		pgx.CopyFromRows(rows),
 	)
 	return err

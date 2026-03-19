@@ -30,4 +30,9 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(embedCmd)
 	rootCmd.AddCommand(graphCmd)
+	rootCmd.AddCommand(detectCmd)
+	rootCmd.AddCommand(hookCmd)
+	rootCmd.AddCommand(hooksCmd)
+	rootCmd.AddCommand(skillsCmd)
+	rootCmd.AddCommand(wikiCmd)
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/goatlas/goatlas/internal/graph"
 	"github.com/goatlas/goatlas/internal/indexer"
 	"github.com/goatlas/goatlas/internal/mcp/handler"
+	"github.com/goatlas/goatlas/internal/mcp/registry"
 	"github.com/goatlas/goatlas/internal/mcp/usecase"
 	"github.com/goatlas/goatlas/internal/vector"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,8 +36,10 @@ func NewServer(cfg ServerConfig) *Server {
 		querier = graph.NewQuerier(cfg.GraphClient)
 	}
 
+	repoReg := registry.NewRepoRegistry(cfg.Pool)
+
 	h := handler.NewMCPHandler(
-		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher, cfg.RepoRoot),
+		usecase.NewSearchCodeUseCase(cfg.IndexerSvc.SymbolRepo, cfg.Searcher, cfg.RepoRoot, cfg.Config.RRFK),
 		usecase.NewReadFileUseCase(cfg.Pool),
 		usecase.NewFindSymbolUseCase(cfg.IndexerSvc.SymbolRepo, cfg.RepoRoot),
 		usecase.NewFindCallersUseCase(cfg.IndexerSvc.SymbolRepo, cfg.IndexerSvc.IIRepo),
@@ -53,8 +56,16 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewGetAPIConsumersUseCase(cfg.IndexerSvc.CACRepo),
 		usecase.NewAnalyzeImpactUseCase(querier),
 		usecase.NewTraceTypeFlowUseCase(cfg.IndexerSvc.TURepo, querier),
+		usecase.NewCheckStalenessUseCase(cfg.IndexerSvc.RepoRepo),
+		usecase.NewListProcessesUseCase(cfg.IndexerSvc.ProcessRepo, cfg.Pool),
+		usecase.NewGetProcessFlowUseCase(cfg.IndexerSvc.ProcessRepo, cfg.Pool),
+		usecase.NewListCommunitiesUseCase(cfg.IndexerSvc.CommunityRepo, cfg.Pool),
+		usecase.NewDetectProcessesUseCase(cfg.Pool, cfg.GraphClient, cfg.IndexerSvc.ProcessRepo, cfg.IndexerSvc.CommunityRepo),
+		usecase.NewListReposUseCase(repoReg),
 	)
 	h.RegisterTools(mcpSrv)
+	h.RegisterResources(mcpSrv, cfg.Pool)
+	h.RegisterPrompts(mcpSrv, cfg.Pool)
 
 	return &Server{mcpServer: mcpSrv}
 }

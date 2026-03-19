@@ -44,6 +44,13 @@ type SymbolWithFile struct {
 	FilePath string // relative path from repo root
 }
 
+// SymbolWithRank extends Symbol with BM25 rank for RRF calculation.
+type SymbolWithRank struct {
+	Symbol
+	FilePath string
+	Rank     int
+}
+
 // APIEndpoint represents an HTTP route detected in source code.
 type APIEndpoint struct {
 	ID          int64
@@ -81,6 +88,7 @@ type RepositoryRepository interface {
 	Upsert(ctx context.Context, r *Repository) error
 	GetByName(ctx context.Context, name string) (*Repository, error)
 	List(ctx context.Context) ([]Repository, error)
+	UpdateLastCommit(ctx context.Context, repoID int64, commit string) error
 }
 
 // FileRepository handles persistence of file records.
@@ -88,6 +96,7 @@ type FileRepository interface {
 	Upsert(ctx context.Context, f *File) error
 	GetByPath(ctx context.Context, repoID int64, path string) (*File, error)
 	DeleteByID(ctx context.Context, id int64) error
+	DeleteByPath(ctx context.Context, repoID int64, path string) error
 }
 
 // SymbolRepository handles persistence and search of symbols.
@@ -96,6 +105,7 @@ type SymbolRepository interface {
 	DeleteByFileID(ctx context.Context, fileID int64) error
 	Search(ctx context.Context, query string, limit int, kind string) ([]Symbol, error)
 	SearchWithFile(ctx context.Context, query string, limit int, kind string) ([]SymbolWithFile, error)
+	SearchRanked(ctx context.Context, query string, limit int, kind string) ([]SymbolWithRank, error)
 	GetByFile(ctx context.Context, fileID int64) ([]Symbol, error)
 	ListByKinds(ctx context.Context, kinds []string, limit int) ([]Symbol, error)
 }

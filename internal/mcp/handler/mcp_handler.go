@@ -27,6 +27,12 @@ type MCPHandler struct {
 	getAPIConsumers    *usecase.GetAPIConsumersUseCase
 	analyzeImpact      *usecase.AnalyzeImpactUseCase
 	traceTypeFlow      *usecase.TraceTypeFlowUseCase
+	checkStaleness     *usecase.CheckStalenessUseCase
+	listProcesses      *usecase.ListProcessesUseCase
+	getProcessFlow     *usecase.GetProcessFlowUseCase
+	listCommunities    *usecase.ListCommunitiesUseCase
+	detectProcesses    *usecase.DetectProcessesUseCase
+	listRepos          *usecase.ListReposUseCase
 }
 
 // NewMCPHandler constructs an MCPHandler with all use cases.
@@ -48,6 +54,12 @@ func NewMCPHandler(
 	gac *usecase.GetAPIConsumersUseCase,
 	ai *usecase.AnalyzeImpactUseCase,
 	ttf *usecase.TraceTypeFlowUseCase,
+	cs *usecase.CheckStalenessUseCase,
+	lp *usecase.ListProcessesUseCase,
+	gpf *usecase.GetProcessFlowUseCase,
+	lcomm *usecase.ListCommunitiesUseCase,
+	dp *usecase.DetectProcessesUseCase,
+	lr *usecase.ListReposUseCase,
 ) *MCPHandler {
 	return &MCPHandler{
 		searchCode:         sc,
@@ -67,6 +79,12 @@ func NewMCPHandler(
 		getAPIConsumers:    gac,
 		analyzeImpact:      ai,
 		traceTypeFlow:      ttf,
+		checkStaleness:     cs,
+		listProcesses:      lp,
+		getProcessFlow:     gpf,
+		listCommunities:    lcomm,
+		detectProcesses:    dp,
+		listRepos:          lr,
 	}
 }
 
@@ -123,8 +141,10 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 	srv.AddTool(mcp.NewTool("find_callers",
 		mcp.WithDescription("Find functions that reference the given function name"),
 		mcp.WithString("function_name", mcp.Required(), mcp.Description("Function name to find callers for")),
+		mcp.WithNumber("min_confidence", mcp.Description("Minimum confidence threshold 0.0-1.0 (default: 0.0 = all)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		fnName := req.GetString("function_name", "")
+		_ = req.GetFloat("min_confidence", 0.0) // TODO: pass to graph-based FindCallers when available
 		result, err := h.findCallers.Execute(ctx, fnName)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -212,10 +232,12 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		mcp.WithDescription("Index or re-index a Go/TypeScript repository. Parses AST to extract symbols (functions, types, methods, interfaces) and API endpoints."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Absolute path to the repository to index")),
 		mcp.WithBoolean("force", mcp.Description("Force re-index all files, even if unchanged (default: false)")),
+		mcp.WithBoolean("incremental", mcp.Description("Only re-index files changed since the last indexed commit (default: false)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		path := req.GetString("path", "")
 		force := req.GetBool("force", false)
-		result, err := h.indexRepo.Execute(ctx, path, force)
+		incremental := req.GetBool("incremental", false)
+		result, err := h.indexRepo.Execute(ctx, path, force, incremental)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -278,9 +300,11 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		mcp.WithDescription("Analyze change impact: when modifying a function, find all affected callers, API endpoints, and UI components. Uses recursive call graph traversal."),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Function or method name to analyze impact for")),
 		mcp.WithNumber("max_depth", mcp.Description("Maximum call graph depth to traverse (default: 5)")),
+		mcp.WithNumber("min_confidence", mcp.Description("Minimum confidence threshold 0.0-1.0 (default: 0.0 = all)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		symbol := req.GetString("symbol", "")
 		maxDepth := int(req.GetFloat("max_depth", 5))
+		_ = req.GetFloat("min_confidence", 0.0) // TODO: pass through when AnalyzeImpact supports it
 		result, err := h.analyzeImpact.Execute(ctx, symbol, maxDepth)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -298,6 +322,74 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		typeName := req.GetString("type_name", "")
 		direction := req.GetString("direction", "both")
 		result, err := h.traceTypeFlow.Execute(ctx, typeName, direction)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Incremental Indexing ---
+
+	srv.AddTool(mcp.NewTool("check_staleness",
+		mcp.WithDescription("Check whether a repository's index is up to date with the current git HEAD commit."),
+		mcp.WithString("repo", mcp.Description("Repository name to check (optional, defaults to first indexed repo)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		repo := req.GetString("repo", "")
+		result, err := h.checkStaleness.Execute(ctx, repo)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	// --- Phase 02: Process & Community Detection ---
+
+	srv.AddTool(mcp.NewTool("list_processes",
+		mcp.WithDescription("List all detected execution processes (HTTP handler flows, Kafka consumer chains, etc.)"),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := h.listProcesses.Execute(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("get_process_flow",
+		mcp.WithDescription("Get the ordered execution flow (call chain) for a named process"),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Process name or partial match (from list_processes)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name := req.GetString("name", "")
+		result, err := h.getProcessFlow.Execute(ctx, name)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("list_communities",
+		mcp.WithDescription("List detected code communities (clusters of highly-interconnected functions via Louvain algorithm)"),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := h.listCommunities.Execute(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("detect_processes",
+		mcp.WithDescription("Trigger process detection (HTTP handlers, Kafka consumers, main()) and community detection (Louvain). Run after index_repository."),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := h.detectProcesses.Execute(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(result), nil
+	})
+
+	srv.AddTool(mcp.NewTool("list_repos",
+		mcp.WithDescription("List all indexed repositories with metadata (name, path, last indexed time, last commit)"),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result, err := h.listRepos.Execute(ctx)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
