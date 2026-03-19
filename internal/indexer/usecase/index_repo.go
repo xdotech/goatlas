@@ -66,12 +66,13 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 	}
 
 	repoName := filepath.Base(absPath)
-	modulePath := parser.ModuleFromGoMod(absPath)
 
-	// Load detection patterns from goatlas.yaml (or embedded defaults)
+	// Load detection patterns (embedded defaults + catalog + overrides)
 	patternCfg, _ := parser.LoadPatterns(absPath)
 
-	// Upsert the repository record; scans back existing last_commit from DB.
+	registry := parser.NewRegistry()
+
+	// Upsert the repository record
 	repo := &domain.Repository{
 		Name: repoName,
 		Path: absPath,
@@ -80,7 +81,7 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 		return nil, fmt.Errorf("upsert repository: %w", err)
 	}
 
-	slog.Info("indexing repository", "name", repoName, "id", repo.ID, "module", modulePath)
+	slog.Info("indexing repository", "name", repoName, "id", repo.ID)
 
 	// Clear cross-service connections for this repo (re-detected each index)
 	if err := uc.connRepo.DeleteByRepoID(ctx, repo.ID); err != nil {
@@ -97,6 +98,7 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 	}
 
 	var allConns []domain.ServiceConnection
+	var allCAC []domain.ComponentAPICall
 
 	// Get current HEAD commit for incremental logic and final update.
 	headCommit, _ := GetHeadCommit(absPath)
@@ -123,7 +125,6 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 				}
 				slog.Info("incremental index", "changed", len(added)+len(modified), "deleted", len(deleted))
 			}
-			// if diffErr != nil: fall through to full walk (targetFiles stays nil)
 		}
 	}
 
@@ -136,23 +137,18 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(fa.path))
-			var indexErr error
-			switch ext {
-			case ".go":
-				indexErr = uc.indexGoFile(ctx, repo.ID, absPath, fa.path, modulePath, force, stats, &allConns, patternCfg)
-			case ".tsx", ".ts", ".jsx", ".js":
-				indexErr = uc.indexJSFile(ctx, repo.ID, absPath, fa.path, force, stats, &allConns, patternCfg)
-			case ".py":
-				indexErr = uc.indexPythonFile(ctx, repo.ID, absPath, fa.path, force, stats)
+			handler := registry.HandlerFor(ext)
+			if handler == nil {
+				continue
 			}
-			if indexErr != nil {
+			if indexErr := uc.indexFile(ctx, repo.ID, absPath, fa.path, handler, patternCfg, force, stats, &allConns, &allCAC); indexErr != nil {
 				slog.Warn("incremental: index file failed", "path", fa.path, "error", indexErr)
 			}
 		}
 	} else {
 		err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil // skip unreadable
+				return nil
 			}
 			if info.IsDir() {
 				base := info.Name()
@@ -164,18 +160,13 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 			}
 
 			ext := strings.ToLower(filepath.Ext(path))
-			relPath, _ := filepath.Rel(absPath, path)
-
-			switch ext {
-			case ".go":
-				return uc.indexGoFile(ctx, repo.ID, absPath, relPath, modulePath, force, stats, &allConns, patternCfg)
-			case ".tsx", ".ts", ".jsx", ".js":
-				return uc.indexJSFile(ctx, repo.ID, absPath, relPath, force, stats, &allConns, patternCfg)
-			case ".py":
-				return uc.indexPythonFile(ctx, repo.ID, absPath, relPath, force, stats)
-			default:
+			handler := registry.HandlerFor(ext)
+			if handler == nil {
 				return nil
 			}
+
+			relPath, _ := filepath.Rel(absPath, path)
+			return uc.indexFile(ctx, repo.ID, absPath, relPath, handler, patternCfg, force, stats, &allConns, &allCAC)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("walk: %w", err)
@@ -190,12 +181,19 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 		stats["connections"] = len(allConns)
 	}
 
-	// Update repo last indexed time via second upsert (safe: doesn't overwrite last_commit).
+	// Bulk insert component API calls
+	if len(allCAC) > 0 {
+		if err := uc.cacRepo.BulkInsert(ctx, allCAC); err != nil {
+			return nil, fmt.Errorf("insert component api calls: %w", err)
+		}
+	}
+
+	// Update repo last indexed time
 	now := time.Now()
 	repo.LastIndexedAt = &now
 	_ = uc.repoRepo.Upsert(ctx, repo)
 
-	// Persist the current HEAD commit so future incremental runs can diff from here.
+	// Persist current HEAD commit for incremental runs
 	if headCommit != "" {
 		_ = uc.repoRepo.UpdateLastCommit(ctx, repo.ID, headCommit)
 	}
@@ -204,7 +202,6 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 		"status":     "ok",
 		"repository": repoName,
 		"repo_id":    repo.ID,
-		"module":     modulePath,
 	}
 	for k, v := range stats {
 		result[k] = v
@@ -212,15 +209,17 @@ func (uc *IndexRepoUseCase) Execute(ctx context.Context, absPath string, force, 
 	return result, nil
 }
 
-// indexGoFile processes a single Go file.
-func (uc *IndexRepoUseCase) indexGoFile(
+// indexFile processes a single source file via the appropriate language handler.
+func (uc *IndexRepoUseCase) indexFile(
 	ctx context.Context,
 	repoID int64,
-	absPath, relPath, modulePath string,
+	absPath, relPath string,
+	handler parser.LanguageHandler,
+	cfg *parser.PatternConfig,
 	force bool,
 	stats map[string]int,
 	allConns *[]domain.ServiceConnection,
-	patternCfg *parser.PatternConfig,
+	allCAC *[]domain.ComponentAPICall,
 ) error {
 	fullPath := filepath.Join(absPath, relPath)
 
@@ -229,31 +228,15 @@ func (uc *IndexRepoUseCase) indexGoFile(
 		return nil
 	}
 
-	// Check existing file: skip if hash unchanged
 	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
 	if existing != nil && existing.Hash == hash && !force {
 		stats["files_skipped"]++
 		return nil
 	}
 
-	// Parse AST
-	parsed, err := parser.ParseFile(fullPath)
-	if err != nil {
-		slog.Warn("parse failed", "file", relPath, "error", err)
-		return nil
-	}
-
-	// Determine module for this file
-	pkgModule := modulePath
-	if pkgModule == "" {
-		pkgModule = parsed.Module
-	}
-
-	// Upsert file record
 	fileRec := &domain.File{
 		RepoID: repoID,
 		Path:   relPath,
-		Module: pkgModule,
 		Hash:   hash,
 	}
 	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
@@ -264,196 +247,86 @@ func (uc *IndexRepoUseCase) indexGoFile(
 	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
 	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
 	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.fcRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.tuRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.iiRepo.DeleteByFileID(ctx, fileRec.ID)
+	_ = uc.cacRepo.DeleteByFileID(ctx, fileRec.ID)
 
-	// Insert symbols
+	// Parse via language handler
+	parsed, err := handler.Parse(ctx, fullPath, cfg)
+	if err != nil {
+		slog.Warn("parse failed", "file", relPath, "lang", handler.Language(), "error", err)
+		return nil
+	}
+
+	// Assign FileID to all results
+	for i := range parsed.Symbols {
+		parsed.Symbols[i].FileID = fileRec.ID
+	}
+	for i := range parsed.Imports {
+		parsed.Imports[i].FileID = fileRec.ID
+	}
+	for i := range parsed.Endpoints {
+		parsed.Endpoints[i].FileID = fileRec.ID
+	}
+	for i := range parsed.FuncCalls {
+		parsed.FuncCalls[i].FileID = fileRec.ID
+	}
+	for i := range parsed.TypeUsages {
+		parsed.TypeUsages[i].FileID = fileRec.ID
+	}
+	for i := range parsed.IfaceImpls {
+		parsed.IfaceImpls[i].FileID = fileRec.ID
+	}
+	for i := range parsed.CompAPICalls {
+		parsed.CompAPICalls[i].FileID = fileRec.ID
+	}
+
+	// Bulk insert
 	if len(parsed.Symbols) > 0 {
-		for i := range parsed.Symbols {
-			parsed.Symbols[i].FileID = fileRec.ID
-		}
 		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
 			return fmt.Errorf("insert symbols: %w", err)
 		}
 		stats["symbols"] += len(parsed.Symbols)
 	}
-
-	// Insert imports
 	if len(parsed.Imports) > 0 {
-		for i := range parsed.Imports {
-			parsed.Imports[i].FileID = fileRec.ID
-		}
 		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
 			return fmt.Errorf("insert imports: %w", err)
 		}
 		stats["imports"] += len(parsed.Imports)
 	}
-
-	// Extract API endpoints
-	endpoints, _ := parser.ExtractRoutes(fullPath, parsed.Imports)
-	if len(endpoints) > 0 {
-		for i := range endpoints {
-			endpoints[i].FileID = fileRec.ID
-		}
-		if err := uc.epRepo.BulkInsert(ctx, endpoints); err != nil {
+	if len(parsed.Endpoints) > 0 {
+		if err := uc.epRepo.BulkInsert(ctx, parsed.Endpoints); err != nil {
 			return fmt.Errorf("insert endpoints: %w", err)
 		}
-		stats["endpoints"] += len(endpoints)
+		stats["endpoints"] += len(parsed.Endpoints)
 	}
-
-	// Detect cross-service connections (gRPC, Kafka)
-	connResult, err := parser.DetectConnections(fullPath, patternCfg)
-	if err == nil && len(connResult.Connections) > 0 {
-		for i := range connResult.Connections {
-			connResult.Connections[i].RepoID = repoID
-			connResult.Connections[i].FileID = fileRec.ID
-		}
-		*allConns = append(*allConns, connResult.Connections...)
-	}
-
-	// Extract function call graph
-	_ = uc.fcRepo.DeleteByFileID(ctx, fileRec.ID)
-	calls, callErr := parser.ExtractFunctionCalls(fullPath)
-	if callErr == nil && len(calls) > 0 {
-		for i := range calls {
-			calls[i].FileID = fileRec.ID
-		}
-		if err := uc.fcRepo.BulkInsert(ctx, calls); err != nil {
+	if len(parsed.FuncCalls) > 0 {
+		if err := uc.fcRepo.BulkInsert(ctx, parsed.FuncCalls); err != nil {
 			slog.Warn("insert function calls failed", "file", relPath, "error", err)
 		}
-		stats["function_calls"] += len(calls)
+		stats["function_calls"] += len(parsed.FuncCalls)
 	}
-
-	// Extract type usages from function signatures
-	_ = uc.tuRepo.DeleteByFileID(ctx, fileRec.ID)
-	typeUsages, tuErr := parser.ExtractTypeUsages(fullPath)
-	if tuErr == nil && len(typeUsages) > 0 {
-		for i := range typeUsages {
-			typeUsages[i].FileID = fileRec.ID
-		}
-		if err := uc.tuRepo.BulkInsert(ctx, typeUsages); err != nil {
+	if len(parsed.TypeUsages) > 0 {
+		if err := uc.tuRepo.BulkInsert(ctx, parsed.TypeUsages); err != nil {
 			slog.Warn("insert type usages failed", "file", relPath, "error", err)
 		}
-		stats["type_usages"] += len(typeUsages)
+		stats["type_usages"] += len(parsed.TypeUsages)
 	}
-
-	// Extract interface implementations
-	_ = uc.iiRepo.DeleteByFileID(ctx, fileRec.ID)
-	impls, iiErr := parser.ExtractInterfaceImpls(fullPath)
-	if iiErr == nil && len(impls) > 0 {
-		for i := range impls {
-			impls[i].FileID = fileRec.ID
-		}
-		if err := uc.iiRepo.BulkInsert(ctx, impls); err != nil {
+	if len(parsed.IfaceImpls) > 0 {
+		if err := uc.iiRepo.BulkInsert(ctx, parsed.IfaceImpls); err != nil {
 			slog.Warn("insert interface impls failed", "file", relPath, "error", err)
 		}
-		stats["interface_impls"] += len(impls)
+		stats["interface_impls"] += len(parsed.IfaceImpls)
 	}
 
-	stats["files_indexed"]++
-	return nil
-}
-
-// indexJSFile processes a single JS/TS/JSX/TSX file.
-func (uc *IndexRepoUseCase) indexJSFile(
-	ctx context.Context,
-	repoID int64,
-	absPath, relPath string,
-	force bool,
-	stats map[string]int,
-	allConns *[]domain.ServiceConnection,
-	patternCfg *parser.PatternConfig,
-) error {
-	fullPath := filepath.Join(absPath, relPath)
-
-	hash, err := hashFile(fullPath)
-	if err != nil {
-		return nil
+	// Accumulate connections and component API calls (bulk inserted after all files)
+	for i := range parsed.Connections {
+		parsed.Connections[i].RepoID = repoID
+		parsed.Connections[i].FileID = fileRec.ID
 	}
-
-	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
-	if existing != nil && existing.Hash == hash && !force {
-		stats["files_skipped"]++
-		return nil
-	}
-
-	// Parse JSX/TS
-	parsed, err := parser.ParseJSXFile(fullPath)
-	if err != nil {
-		slog.Warn("parse JS failed", "file", relPath, "error", err)
-		return nil
-	}
-
-	fileRec := &domain.File{
-		RepoID: repoID,
-		Path:   relPath,
-		Hash:   hash,
-	}
-	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
-		return fmt.Errorf("upsert file %s: %w", relPath, err)
-	}
-
-	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
-	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
-	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
-
-	if len(parsed.Symbols) > 0 {
-		for i := range parsed.Symbols {
-			parsed.Symbols[i].FileID = fileRec.ID
-		}
-		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
-			return fmt.Errorf("insert symbols: %w", err)
-		}
-		stats["symbols"] += len(parsed.Symbols)
-	}
-
-	if len(parsed.Imports) > 0 {
-		for i := range parsed.Imports {
-			parsed.Imports[i].FileID = fileRec.ID
-		}
-		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
-			return fmt.Errorf("insert imports: %w", err)
-		}
-		stats["imports"] += len(parsed.Imports)
-	}
-
-	// Extract React routes
-	endpoints, _ := parser.ExtractReactRoutes(fullPath, parsed.Imports)
-	if len(endpoints) > 0 {
-		for i := range endpoints {
-			endpoints[i].FileID = fileRec.ID
-		}
-		if err := uc.epRepo.BulkInsert(ctx, endpoints); err != nil {
-			return fmt.Errorf("insert endpoints: %w", err)
-		}
-		stats["endpoints"] += len(endpoints)
-	}
-
-	// Detect API service references in TS files (e.g. SVC_PREFIX constants)
-	if patternCfg != nil && len(patternCfg.TypeScript.APIPrefix) > 0 {
-		tsConns, _ := parser.DetectTSAPIConnections(fullPath, patternCfg.TypeScript.APIPrefix)
-		if len(tsConns) > 0 {
-			for i := range tsConns {
-				tsConns[i].RepoID = repoID
-				tsConns[i].FileID = fileRec.ID
-			}
-			*allConns = append(*allConns, tsConns...)
-		}
-	}
-
-	// Detect component-level API calls (React component → backend API)
-	var apiPatterns []parser.TSAPIPattern
-	if patternCfg != nil {
-		apiPatterns = patternCfg.TypeScript.APIPrefix
-	}
-	_ = uc.cacRepo.DeleteByFileID(ctx, fileRec.ID)
-	componentCalls, _ := parser.DetectComponentAPICalls(fullPath, apiPatterns)
-	if len(componentCalls) > 0 {
-		for i := range componentCalls {
-			componentCalls[i].FileID = fileRec.ID
-		}
-		if err := uc.cacRepo.BulkInsert(ctx, componentCalls); err != nil {
-			return fmt.Errorf("insert component API calls: %w", err)
-		}
-	}
+	*allConns = append(*allConns, parsed.Connections...)
+	*allCAC = append(*allCAC, parsed.CompAPICalls...)
 
 	stats["files_indexed"]++
 	return nil
@@ -466,79 +339,4 @@ func hashFile(path string) (string, error) {
 	}
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:]), nil
-}
-
-// indexPythonFile processes a single Python file.
-func (uc *IndexRepoUseCase) indexPythonFile(
-	ctx context.Context,
-	repoID int64,
-	absPath, relPath string,
-	force bool,
-	stats map[string]int,
-) error {
-	fullPath := filepath.Join(absPath, relPath)
-
-	hash, err := hashFile(fullPath)
-	if err != nil {
-		return nil
-	}
-
-	existing, _ := uc.fileRepo.GetByPath(ctx, repoID, relPath)
-	if existing != nil && existing.Hash == hash && !force {
-		stats["files_skipped"]++
-		return nil
-	}
-
-	parsed, err := parser.ParsePythonFile(fullPath)
-	if err != nil {
-		slog.Warn("parse Python failed", "file", relPath, "error", err)
-		return nil
-	}
-
-	fileRec := &domain.File{
-		RepoID: repoID,
-		Path:   relPath,
-		Module: parsed.Module,
-		Hash:   hash,
-	}
-	if err := uc.fileRepo.Upsert(ctx, fileRec); err != nil {
-		return fmt.Errorf("upsert file %s: %w", relPath, err)
-	}
-
-	_ = uc.symbolRepo.DeleteByFileID(ctx, fileRec.ID)
-	_ = uc.importRepo.DeleteByFileID(ctx, fileRec.ID)
-	_ = uc.epRepo.DeleteByFileID(ctx, fileRec.ID)
-
-	if len(parsed.Symbols) > 0 {
-		for i := range parsed.Symbols {
-			parsed.Symbols[i].FileID = fileRec.ID
-		}
-		if err := uc.symbolRepo.BulkInsert(ctx, parsed.Symbols); err != nil {
-			return fmt.Errorf("insert symbols: %w", err)
-		}
-		stats["symbols"] += len(parsed.Symbols)
-	}
-
-	if len(parsed.Imports) > 0 {
-		for i := range parsed.Imports {
-			parsed.Imports[i].FileID = fileRec.ID
-		}
-		if err := uc.importRepo.BulkInsert(ctx, parsed.Imports); err != nil {
-			return fmt.Errorf("insert imports: %w", err)
-		}
-		stats["imports"] += len(parsed.Imports)
-	}
-
-	if len(parsed.Endpoints) > 0 {
-		for i := range parsed.Endpoints {
-			parsed.Endpoints[i].FileID = fileRec.ID
-		}
-		if err := uc.epRepo.BulkInsert(ctx, parsed.Endpoints); err != nil {
-			return fmt.Errorf("insert endpoints: %w", err)
-		}
-		stats["endpoints"] += len(parsed.Endpoints)
-	}
-
-	stats["files_indexed"]++
-	return nil
 }

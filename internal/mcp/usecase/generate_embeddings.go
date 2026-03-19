@@ -12,17 +12,17 @@ import (
 type GenerateEmbeddingsUseCase struct {
 	pool      *pgxpool.Pool
 	qdrantURL string
-	apiKey    string
+	embedCfg  vector.EmbedConfig
 }
 
 // NewGenerateEmbeddingsUseCase creates a new GenerateEmbeddingsUseCase.
-func NewGenerateEmbeddingsUseCase(pool *pgxpool.Pool, qdrantURL, apiKey string) *GenerateEmbeddingsUseCase {
-	return &GenerateEmbeddingsUseCase{pool: pool, qdrantURL: qdrantURL, apiKey: apiKey}
+func NewGenerateEmbeddingsUseCase(pool *pgxpool.Pool, qdrantURL string, embedCfg vector.EmbedConfig) *GenerateEmbeddingsUseCase {
+	return &GenerateEmbeddingsUseCase{pool: pool, qdrantURL: qdrantURL, embedCfg: embedCfg}
 }
 
 // Execute generates embeddings for all indexed symbols.
 func (uc *GenerateEmbeddingsUseCase) Execute(ctx context.Context, force bool) (string, error) {
-	if uc.apiKey == "" {
+	if uc.embedCfg.Provider != "ollama" && uc.embedCfg.GeminiKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY not configured — cannot generate embeddings")
 	}
 
@@ -39,7 +39,7 @@ func (uc *GenerateEmbeddingsUseCase) Execute(ctx context.Context, force bool) (s
 		store = vector.NewPgVectorStore(uc.pool)
 	}
 
-	embedder, err := vector.NewEmbedder(ctx, uc.apiKey)
+	embedder, err := vector.NewEmbedder(ctx, uc.embedCfg)
 	if err != nil {
 		return "", fmt.Errorf("create embedder: %w", err)
 	}

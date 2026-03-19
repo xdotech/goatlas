@@ -48,32 +48,7 @@ func DetectConnections(filePath string, cfg *PatternConfig) (*ConnectionResult, 
 			return true
 		}
 
-		// Check gRPC patterns
-		for _, p := range cfg.Go.GRPC {
-			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
-				result.Connections = append(result.Connections, *conn)
-				break
-			}
-		}
-
-		// Check Kafka consumer patterns
-		for _, p := range cfg.Go.KafkaConsumer {
-			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
-				result.Connections = append(result.Connections, *conn)
-				break
-			}
-		}
-
-		// Check Kafka producer patterns
-		for _, p := range cfg.Go.KafkaProducer {
-			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
-				result.Connections = append(result.Connections, *conn)
-				break
-			}
-		}
-
-		// Check HTTP client patterns
-		for _, p := range cfg.Go.HTTPClient {
+		for _, p := range cfg.Go {
 			if conn := matchGoCall(call, fset, importAliases, p); conn != nil {
 				result.Connections = append(result.Connections, *conn)
 				break

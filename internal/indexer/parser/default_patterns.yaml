@@ -1,31 +1,29 @@
 # Default detection patterns (embedded fallback)
+# Flat list per language — conn_type on each pattern determines the connection kind.
+# Supports any conn_type: grpc, kafka_consume, kafka_publish, http_api, redis, nats, etc.
 go:
-  grpc:
-    - package_suffix: "grpcx"
-      function: "NewClientManager"
-      target_arg: 1
-      conn_type: "grpc"
-  kafka_consumer:
-    - package_contains: "queue/kafka"
-      functions: ["MustNewListener", "NewQueue"]
-      target_arg: 0
-      conn_type: "kafka_consume"
-  kafka_producer:
-    - package_suffix: "/queue"
-      functions: ["Must", "New"]
-      target_arg: 0
-      conn_type: "kafka_publish"
-  http_client:
-    - package_suffix: "httpc"
-      function: "NewWithBaseURL"
-      target_arg: 0
-      conn_type: "http_api"
-    - package_suffix: "httpc"
-      function: "NewWithClientAndBaseURL"
-      target_arg: 0
-      conn_type: "http_api"
+  - package_suffix: "grpcx"
+    function: "NewClientManager"
+    target_arg: 1
+    conn_type: "grpc"
+  - package_contains: "queue/kafka"
+    functions: ["MustNewListener", "NewQueue"]
+    target_arg: 0
+    conn_type: "kafka_consume"
+  - package_suffix: "/queue"
+    functions: ["Must", "New"]
+    target_arg: 0
+    conn_type: "kafka_publish"
+  - package_suffix: "httpc"
+    function: "NewWithBaseURL"
+    target_arg: 0
+    conn_type: "http_api"
+  - package_suffix: "httpc"
+    function: "NewWithClientAndBaseURL"
+    target_arg: 0
+    conn_type: "http_api"
+
 typescript:
-  api_prefix:
-    - pattern: "=\\s*['\"`]([a-zA-Z0-9_-]+-svc)/api/"
-      conn_type: "http_api"
-      file_glob: "*.api.ts"
+  - pattern: "=\\s*['\"`]([a-zA-Z0-9_-]+-svc)/api/"
+    conn_type: "http_api"
+    file_glob: "*.api.ts"

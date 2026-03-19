@@ -12,18 +12,15 @@ import (
 //go:embed default_patterns.yaml
 var defaultPatternsYAML []byte
 
-// PatternConfig holds all detection patterns loaded from goatlas.yaml.
+// PatternConfig holds all detection patterns.
+// Each language has a flat list of patterns — conn_type on each pattern
+// determines what kind of connection it represents. No hardcoded categories,
+// so any conn_type (grpc, kafka_consume, redis, nats, …) is supported.
 type PatternConfig struct {
-	Go         GoPatterns         `yaml:"go"`
-	TypeScript TypeScriptPatterns `yaml:"typescript"`
-}
-
-// GoPatterns groups Go AST-based detection patterns.
-type GoPatterns struct {
-	GRPC          []GoCallPattern `yaml:"grpc"`
-	KafkaConsumer []GoCallPattern `yaml:"kafka_consumer"`
-	KafkaProducer []GoCallPattern `yaml:"kafka_producer"`
-	HTTPClient    []GoCallPattern `yaml:"http_client"`
+	Go         []GoCallPattern   `yaml:"go"`
+	TypeScript []TSAPIPattern    `yaml:"typescript"`
+	Python     []PyCallPattern   `yaml:"python"`
+	Java       []JavaCallPattern `yaml:"java"`
 }
 
 // GoCallPattern describes a Go function call pattern to detect.
@@ -36,42 +33,76 @@ type GoCallPattern struct {
 	ConnType        string   `yaml:"conn_type"`
 }
 
-// TypeScriptPatterns groups TypeScript detection patterns.
-type TypeScriptPatterns struct {
-	APIPrefix []TSAPIPattern `yaml:"api_prefix"`
-}
-
-// TSAPIPattern describes a regex pattern to detect API service references in TS files.
+// TSAPIPattern describes a regex pattern to detect API service references in TS/JS files.
 type TSAPIPattern struct {
 	Pattern  string `yaml:"pattern"`
 	ConnType string `yaml:"conn_type"`
 	FileGlob string `yaml:"file_glob"`
 }
 
-// LoadPatterns loads detection patterns with the following priority:
-//  1. {repoPath}/goatlas.yaml           (per-repo override)
-//  2. ~/.goatlas/goatlas.yaml             (global user config)
-//  3. Embedded default_patterns.yaml     (fallback)
-func LoadPatterns(repoPath string) (*PatternConfig, error) {
-	data := defaultPatternsYAML
+// PyCallPattern describes a Python call pattern for connection detection.
+type PyCallPattern struct {
+	ModuleContains string `yaml:"module_contains"`
+	CallPattern    string `yaml:"call_pattern"`
+	TargetArgIndex int    `yaml:"target_arg"`
+	TargetKeyword  string `yaml:"target_keyword"`
+	ConnType       string `yaml:"conn_type"`
+}
 
-	// Priority 2: global config
+// JavaCallPattern describes a Java AST pattern for connection detection.
+type JavaCallPattern struct {
+	ImportContains  string `yaml:"import_contains"`
+	Annotation      string `yaml:"annotation"`
+	TargetAttribute string `yaml:"target_attribute"`
+	MethodCall      string `yaml:"method_call"`
+	TargetArgIndex  int    `yaml:"target_arg"`
+	ConnType        string `yaml:"conn_type"`
+}
+
+// LoadPatterns loads detection patterns with the following merged priority:
+//  1. Embedded default_patterns.yaml (base)
+//  2. Auto-discovered catalog patterns (from dep files)
+//  3. ~/.goatlas/goatlas.yaml (global user override)
+//  4. {repoPath}/goatlas.yaml (per-repo override, highest)
+func LoadPatterns(repoPath string) (*PatternConfig, error) {
+	var cfg PatternConfig
+	if err := yaml.Unmarshal(defaultPatternsYAML, &cfg); err != nil {
+		return nil, fmt.Errorf("parse default patterns: %w", err)
+	}
+
+	// Step 2: auto-discover deps and merge catalog patterns
+	if deps, err := DiscoverDependencies(repoPath); err == nil {
+		catalogCfg := LookupCatalog(deps)
+		mergePatterns(&cfg, catalogCfg)
+	}
+
+	// Step 3: global user override (~/.goatlas/goatlas.yaml)
 	if home, err := os.UserHomeDir(); err == nil {
 		globalPath := filepath.Join(home, ".goatlas", "goatlas.yaml")
 		if fileData, err := os.ReadFile(globalPath); err == nil {
-			data = fileData
+			var overrideCfg PatternConfig
+			if err := yaml.Unmarshal(fileData, &overrideCfg); err == nil {
+				mergePatterns(&cfg, &overrideCfg)
+			}
 		}
 	}
 
-	// Priority 1: repo-local config (overrides global)
-	configPath := filepath.Join(repoPath, "goatlas.yaml")
-	if fileData, err := os.ReadFile(configPath); err == nil {
-		data = fileData
+	// Step 4: per-repo override ({repoPath}/goatlas.yaml)
+	repoConfigPath := filepath.Join(repoPath, "goatlas.yaml")
+	if fileData, err := os.ReadFile(repoConfigPath); err == nil {
+		var overrideCfg PatternConfig
+		if err := yaml.Unmarshal(fileData, &overrideCfg); err == nil {
+			mergePatterns(&cfg, &overrideCfg)
+		}
 	}
 
-	var cfg PatternConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse patterns config: %w", err)
-	}
 	return &cfg, nil
+}
+
+// mergePatterns appends patterns from src into dst (additive, no dedup).
+func mergePatterns(dst, src *PatternConfig) {
+	dst.Go = append(dst.Go, src.Go...)
+	dst.TypeScript = append(dst.TypeScript, src.TypeScript...)
+	dst.Python = append(dst.Python, src.Python...)
+	dst.Java = append(dst.Java, src.Java...)
 }

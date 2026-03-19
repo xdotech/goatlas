@@ -12,11 +12,11 @@ import (
 type VectorIndexer struct {
 	pool     *pgxpool.Pool
 	store    VectorStore
-	embedder *Embedder
+	embedder Embedder
 }
 
 // NewVectorIndexer creates a VectorIndexer.
-func NewVectorIndexer(pool *pgxpool.Pool, store VectorStore, embedder *Embedder) *VectorIndexer {
+func NewVectorIndexer(pool *pgxpool.Pool, store VectorStore, embedder Embedder) *VectorIndexer {
 	return &VectorIndexer{pool: pool, store: store, embedder: embedder}
 }
 

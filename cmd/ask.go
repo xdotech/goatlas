@@ -16,7 +16,7 @@ import (
 
 var askCmd = &cobra.Command{
 	Use:   "ask <question>",
-	Short: "Ask a question about the codebase using Gemini AI",
+	Short: "Ask a question about the codebase using an LLM agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		question := args[0]
@@ -26,8 +26,8 @@ var askCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		if cfg.GeminiAPIKey == "" {
-			return fmt.Errorf("GEMINI_API_KEY not set")
+		if cfg.LLMProvider != "ollama" && cfg.GeminiAPIKey == "" {
+			return fmt.Errorf("GEMINI_API_KEY not set (or set LLM_PROVIDER=ollama)")
 		}
 
 		pool, err := db.NewPool(ctx, cfg.DatabaseDSN)
@@ -67,7 +67,13 @@ var askCmd = &cobra.Command{
 			agentCfg.RepoName = cfg.RepoPath
 		}
 
-		a, err := agent.NewAgent(ctx, agentCfg, cfg.GeminiAPIKey, bridge, systemPrompt)
+		provCfg := agent.ProviderConfig{
+			Provider:    cfg.LLMProvider,
+			GeminiKey:   cfg.GeminiAPIKey,
+			OllamaURL:   cfg.OllamaURL,
+			OllamaModel: cfg.OllamaModel,
+		}
+		a, err := agent.NewAgent(ctx, agentCfg, provCfg, bridge, systemPrompt)
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}

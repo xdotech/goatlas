@@ -50,7 +50,12 @@ func NewServer(cfg ServerConfig) *Server {
 		usecase.NewGetAPIHandlersUseCase(querier),
 		usecase.NewListComponentsUseCase(cfg.IndexerSvc.SymbolRepo),
 		usecase.NewIndexRepoUseCase(cfg.IndexerSvc),
-		usecase.NewGenerateEmbeddingsUseCase(cfg.Pool, cfg.Config.QdrantURL, cfg.Config.GeminiAPIKey),
+		usecase.NewGenerateEmbeddingsUseCase(cfg.Pool, cfg.Config.QdrantURL, vector.EmbedConfig{
+			Provider:    cfg.Config.EmbedProvider,
+			GeminiKey:   cfg.Config.GeminiAPIKey,
+			OllamaURL:   cfg.Config.OllamaURL,
+			OllamaModel: cfg.Config.OllamaEmbedModel,
+		}),
 		usecase.NewBuildGraphUseCase(cfg.GraphClient, cfg.Pool),
 		usecase.NewGetComponentAPIsUseCase(cfg.IndexerSvc.CACRepo),
 		usecase.NewGetAPIConsumersUseCase(cfg.IndexerSvc.CACRepo),

@@ -46,7 +46,13 @@ var skillsGenerateCmd = &cobra.Command{
 		}
 
 		// Create agent
-		a, err := agent.NewAgent(ctx, agent.DefaultConfig(), cfg.GeminiAPIKey, nil, "")
+		provCfg := agent.ProviderConfig{
+			Provider:    cfg.LLMProvider,
+			GeminiKey:   cfg.GeminiAPIKey,
+			OllamaURL:   cfg.OllamaURL,
+			OllamaModel: cfg.OllamaModel,
+		}
+		a, err := agent.NewAgent(ctx, agent.DefaultConfig(), provCfg, nil, "")
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}

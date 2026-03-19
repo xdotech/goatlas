@@ -17,6 +17,15 @@ type Config struct {
 	GeminiAPIKey string
 	HTTPAddr     string
 	RRFK         int // RRF constant k (default 60)
+
+	// LLM provider: "gemini" (default) | "ollama"
+	LLMProvider string
+	// Embedding provider: "gemini" (default) | "ollama"
+	EmbedProvider string
+	// Ollama settings (used when provider is "ollama")
+	OllamaURL        string
+	OllamaModel      string // chat model, e.g. "llama3.2"
+	OllamaEmbedModel string // embedding model, e.g. "nomic-embed-text"
 }
 
 // Load reads configuration from environment variables and optional .env file.
@@ -27,12 +36,17 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	viper.SetDefault("DATABASE_DSN", "postgres://goatlas:goatlas@localhost:5432/goatlas")
-	viper.SetDefault("QDRANT_URL", "http://localhost:6334")
+	// QDRANT_URL has no default — empty means use pgvector
 	viper.SetDefault("NEO4J_URL", "bolt://localhost:7687")
 	viper.SetDefault("NEO4J_USER", "neo4j")
 	viper.SetDefault("NEO4J_PASS", "goatlas_neo4j")
 	viper.SetDefault("HTTP_ADDR", ":8080")
 	viper.SetDefault("GOATLAS_RRF_K", 60)
+	viper.SetDefault("LLM_PROVIDER", "gemini")
+	viper.SetDefault("EMBED_PROVIDER", "gemini")
+	viper.SetDefault("OLLAMA_URL", "http://localhost:11434")
+	viper.SetDefault("OLLAMA_MODEL", "llama3.2")
+	viper.SetDefault("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
 	_ = viper.ReadInConfig() // ignore missing .env file
 
@@ -42,14 +56,19 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		RepoPath:     repoPath,
-		DatabaseDSN:  viper.GetString("DATABASE_DSN"),
-		QdrantURL:    viper.GetString("QDRANT_URL"),
-		Neo4jURL:     viper.GetString("NEO4J_URL"),
-		Neo4jUser:    viper.GetString("NEO4J_USER"),
-		Neo4jPass:    viper.GetString("NEO4J_PASS"),
-		GeminiAPIKey: viper.GetString("GEMINI_API_KEY"),
-		HTTPAddr:     viper.GetString("HTTP_ADDR"),
-		RRFK:         viper.GetInt("GOATLAS_RRF_K"),
+		RepoPath:         repoPath,
+		DatabaseDSN:      viper.GetString("DATABASE_DSN"),
+		QdrantURL:        viper.GetString("QDRANT_URL"),
+		Neo4jURL:         viper.GetString("NEO4J_URL"),
+		Neo4jUser:        viper.GetString("NEO4J_USER"),
+		Neo4jPass:        viper.GetString("NEO4J_PASS"),
+		GeminiAPIKey:     viper.GetString("GEMINI_API_KEY"),
+		HTTPAddr:         viper.GetString("HTTP_ADDR"),
+		RRFK:             viper.GetInt("GOATLAS_RRF_K"),
+		LLMProvider:      viper.GetString("LLM_PROVIDER"),
+		EmbedProvider:    viper.GetString("EMBED_PROVIDER"),
+		OllamaURL:        viper.GetString("OLLAMA_URL"),
+		OllamaModel:      viper.GetString("OLLAMA_MODEL"),
+		OllamaEmbedModel: viper.GetString("OLLAMA_EMBED_MODEL"),
 	}, nil
 }

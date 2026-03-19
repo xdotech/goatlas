@@ -23,8 +23,8 @@ var embedCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		if cfg.GeminiAPIKey == "" {
-			return fmt.Errorf("GEMINI_API_KEY not set")
+		if cfg.EmbedProvider != "ollama" && cfg.GeminiAPIKey == "" {
+			return fmt.Errorf("GEMINI_API_KEY not set (or set EMBED_PROVIDER=ollama)")
 		}
 
 		pool, err := db.NewPool(ctx, cfg.DatabaseDSN)
@@ -48,7 +48,13 @@ var embedCmd = &cobra.Command{
 			store = vector.NewPgVectorStore(pool)
 		}
 
-		embedder, err := vector.NewEmbedder(ctx, cfg.GeminiAPIKey)
+		embedCfg := vector.EmbedConfig{
+			Provider:    cfg.EmbedProvider,
+			GeminiKey:   cfg.GeminiAPIKey,
+			OllamaURL:   cfg.OllamaURL,
+			OllamaModel: cfg.OllamaEmbedModel,
+		}
+		embedder, err := vector.NewEmbedder(ctx, embedCfg)
 		if err != nil {
 			return fmt.Errorf("create embedder: %w", err)
 		}

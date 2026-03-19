@@ -9,11 +9,11 @@ import (
 // Searcher performs semantic search using vector embeddings.
 type Searcher struct {
 	store    VectorStore
-	embedder *Embedder
+	embedder Embedder
 }
 
 // NewSearcher creates a Searcher.
-func NewSearcher(store VectorStore, embedder *Embedder) *Searcher {
+func NewSearcher(store VectorStore, embedder Embedder) *Searcher {
 	return &Searcher{store: store, embedder: embedder}
 }
 

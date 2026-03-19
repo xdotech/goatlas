@@ -52,7 +52,8 @@ var serveCmd = &cobra.Command{
 
 		// Select vector store: Qdrant if configured, otherwise pgvector (default).
 		var vectorSearcher *vector.Searcher
-		if cfg.GeminiAPIKey != "" {
+		embedEnabled := cfg.EmbedProvider == "ollama" || cfg.GeminiAPIKey != ""
+		if embedEnabled {
 			var store vector.VectorStore
 			if cfg.QdrantURL != "" {
 				qc, err := vector.NewQdrantClient(ctx, cfg.QdrantURL)
@@ -69,7 +70,13 @@ var serveCmd = &cobra.Command{
 				fmt.Fprintln(os.Stderr, "✅ Vector store: pgvector (PostgreSQL)")
 			}
 
-			embedder, err := vector.NewEmbedder(ctx, cfg.GeminiAPIKey)
+			embedCfg := vector.EmbedConfig{
+				Provider:    cfg.EmbedProvider,
+				GeminiKey:   cfg.GeminiAPIKey,
+				OllamaURL:   cfg.OllamaURL,
+				OllamaModel: cfg.OllamaEmbedModel,
+			}
+			embedder, err := vector.NewEmbedder(ctx, embedCfg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠️  Embedder unavailable: %v\n", err)
 			} else {
@@ -77,7 +84,7 @@ var serveCmd = &cobra.Command{
 				vectorSearcher = vector.NewSearcher(store, embedder)
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "⚠️  GEMINI_API_KEY not set (semantic search disabled)")
+			fmt.Fprintln(os.Stderr, "⚠️  No embed provider configured (semantic search disabled)")
 		}
 
 		indexerSvc := indexer.NewService(pool)
