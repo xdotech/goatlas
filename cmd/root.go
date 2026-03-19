@@ -21,6 +21,11 @@ func Execute() {
 	}
 }
 
+// SetVersionInfo sets version information from build ldflags.
+func SetVersionInfo(version, commit, date string) {
+	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
+}
+
 func init() {
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(serveCmd)

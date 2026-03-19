@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
 	"github.com/spf13/cobra"
 )
 

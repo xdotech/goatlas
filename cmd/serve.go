@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/db"
-	"github.com/goatlas/goatlas/internal/graph"
-	"github.com/goatlas/goatlas/internal/indexer"
-	mcpserver "github.com/goatlas/goatlas/internal/mcp"
-	"github.com/goatlas/goatlas/internal/vector"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/indexer"
+	mcpserver "github.com/xdotech/goatlas/internal/mcp"
+	"github.com/xdotech/goatlas/internal/vector"
 	"github.com/spf13/cobra"
 )
 

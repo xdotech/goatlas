@@ -1,9 +1,9 @@
 package indexer
 
 import (
-	"github.com/goatlas/goatlas/internal/indexer/domain"
-	"github.com/goatlas/goatlas/internal/indexer/repository/postgres"
-	"github.com/goatlas/goatlas/internal/indexer/usecase"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/repository/postgres"
+	"github.com/xdotech/goatlas/internal/indexer/usecase"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

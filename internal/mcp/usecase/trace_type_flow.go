@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/graph"
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // TraceTypeFlowUseCase traces how a type flows through the codebase.

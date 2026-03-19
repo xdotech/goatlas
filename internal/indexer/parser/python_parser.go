@@ -10,7 +10,7 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 	tree_sitter_python "github.com/tree-sitter/tree-sitter-python/bindings/go"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // Python symbol kinds

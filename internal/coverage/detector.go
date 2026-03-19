@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

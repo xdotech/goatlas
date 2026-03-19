@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/graph"
 )
 
 // GetAPIHandlersUseCase queries Neo4j for functions matching an endpoint pattern.

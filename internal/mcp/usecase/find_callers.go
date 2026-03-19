@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // FindCallersUseCase finds symbols that reference a given function name.

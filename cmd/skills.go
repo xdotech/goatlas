@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/goatlas/goatlas/internal/agent"
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/agent"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
 	"github.com/spf13/cobra"
 )
 

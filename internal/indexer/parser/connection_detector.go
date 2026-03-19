@@ -7,7 +7,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // ConnectionResult holds cross-service connections detected in a Go source file.

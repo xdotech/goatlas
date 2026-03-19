@@ -7,7 +7,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // ExtractTypeUsages parses a Go file and extracts type usage information

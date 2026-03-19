@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 
-	"github.com/goatlas/goatlas/internal/mcp/usecase"
+	"github.com/xdotech/goatlas/internal/mcp/usecase"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

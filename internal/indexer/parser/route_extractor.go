@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // ExtractRoutes detects HTTP routes based on framework imports present in the file.

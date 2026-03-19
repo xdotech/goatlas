@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // React framework identifiers stored in api_endpoints.framework

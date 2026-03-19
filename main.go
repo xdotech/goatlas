@@ -1,7 +1,14 @@
 package main
 
-import "github.com/goatlas/goatlas/cmd"
+import "github.com/xdotech/goatlas/cmd"
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
+	cmd.SetVersionInfo(version, commit, date)
 	cmd.Execute()
 }

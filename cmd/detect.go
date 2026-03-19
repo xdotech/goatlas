@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/db"
-	"github.com/goatlas/goatlas/internal/graph"
-	"github.com/goatlas/goatlas/internal/indexer/repository/postgres"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/indexer/repository/postgres"
 	"github.com/spf13/cobra"
 )
 

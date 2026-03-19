@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 
-	"github.com/goatlas/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/graph"
 )
 
 // GetServiceDepsUseCase queries Neo4j for a service's imported packages.

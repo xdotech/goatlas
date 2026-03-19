@@ -1,4 +1,4 @@
-module github.com/goatlas/goatlas
+module github.com/xdotech/goatlas
 
 go 1.25.3
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
-	idxusecase "github.com/goatlas/goatlas/internal/indexer/usecase"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
+	idxusecase "github.com/xdotech/goatlas/internal/indexer/usecase"
 )
 
 // CheckStalenessUseCase checks whether a repository needs re-indexing.

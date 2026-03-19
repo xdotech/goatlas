@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/mcp/registry"
+	"github.com/xdotech/goatlas/internal/mcp/registry"
 )
 
 // ListReposUseCase lists all indexed repositories.

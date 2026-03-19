@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/graph"
 )
 
 // AnalyzeImpactUseCase analyzes the change impact of modifying a function.

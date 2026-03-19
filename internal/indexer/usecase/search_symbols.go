@@ -3,7 +3,7 @@ package usecase
 import (
 	"context"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // SearchSymbolsUseCase performs full-text symbol search against the index.

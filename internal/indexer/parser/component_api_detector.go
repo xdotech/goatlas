@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // Common HTTP method call patterns in TypeScript/JavaScript.

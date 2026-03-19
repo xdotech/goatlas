@@ -1,13 +1,13 @@
 package mcp
 
 import (
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/graph"
-	"github.com/goatlas/goatlas/internal/indexer"
-	"github.com/goatlas/goatlas/internal/mcp/handler"
-	"github.com/goatlas/goatlas/internal/mcp/registry"
-	"github.com/goatlas/goatlas/internal/mcp/usecase"
-	"github.com/goatlas/goatlas/internal/vector"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/indexer"
+	"github.com/xdotech/goatlas/internal/mcp/handler"
+	"github.com/xdotech/goatlas/internal/mcp/registry"
+	"github.com/xdotech/goatlas/internal/mcp/usecase"
+	"github.com/xdotech/goatlas/internal/vector"
 	"github.com/jackc/pgx/v5/pgxpool"
 	mcpgo "github.com/mark3labs/mcp-go/server"
 )

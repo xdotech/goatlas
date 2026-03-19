@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/goatlas/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/graph"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
-	"github.com/goatlas/goatlas/internal/indexer/parser"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/parser"
 )
 
 // IndexRepoUseCase indexes (or re-indexes) a repository.

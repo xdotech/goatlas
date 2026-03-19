@@ -5,7 +5,7 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
 // DetectTSAPIConnections scans a TypeScript file for API service references

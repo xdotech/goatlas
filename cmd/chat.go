@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/agent"
-	"github.com/goatlas/goatlas/internal/config"
-	"github.com/goatlas/goatlas/internal/db"
-	"github.com/goatlas/goatlas/internal/graph"
-	"github.com/goatlas/goatlas/internal/indexer"
-	mcpusecase "github.com/goatlas/goatlas/internal/mcp/usecase"
+	"github.com/xdotech/goatlas/internal/agent"
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/graph"
+	"github.com/xdotech/goatlas/internal/indexer"
+	mcpusecase "github.com/xdotech/goatlas/internal/mcp/usecase"
 	"github.com/spf13/cobra"
 )
 

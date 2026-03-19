@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/goatlas/goatlas/internal/mcp/usecase"
+	"github.com/xdotech/goatlas/internal/mcp/usecase"
 )
 
 // ToolHandler executes a tool and returns a string result.

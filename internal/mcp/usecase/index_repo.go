@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/goatlas/goatlas/internal/indexer"
+	"github.com/xdotech/goatlas/internal/indexer"
 )
 
 // IndexRepoUseCase indexes a repository via MCP.

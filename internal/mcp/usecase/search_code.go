@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goatlas/goatlas/internal/indexer/domain"
-	"github.com/goatlas/goatlas/internal/vector"
+	"github.com/xdotech/goatlas/internal/indexer/domain"
+	"github.com/xdotech/goatlas/internal/vector"
 	"golang.org/x/sync/errgroup"
 )
 
