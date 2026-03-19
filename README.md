@@ -2,6 +2,10 @@
 
 [![Go](https://img.shields.io/badge/Go_1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/) [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/) [![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat-square&logo=neo4j&logoColor=white)](https://neo4j.com/) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/) [![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/) [![MCP](https://img.shields.io/badge/MCP-Protocol-blueviolet?style=flat-square)](https://modelcontextprotocol.io/)
 
+<p align="center">
+  <img src="goatlas.jpg" alt="GoAtlas — AI-Powered Code Intelligence Engine" width="100%">
+</p>
+
 **GoAtlas** is an AI-powered code intelligence platform that helps LLMs and developers deeply understand large Go/TypeScript codebases — combining AST parsing, a Neo4j knowledge graph, pgvector semantic search, and Gemini AI, all exposed via the **Model Context Protocol (MCP)**.
 
 ## What Makes It Different
