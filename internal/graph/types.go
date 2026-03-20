@@ -51,6 +51,7 @@ type CallerResult struct {
 	Line          int
 	Depth         int
 	Confidence    float64
+	IsNameMatch   bool // true when result is a name-match fallback (no CALLS edge in graph)
 }
 
 // AffectedEndpoint represents an API endpoint affected by a code change.

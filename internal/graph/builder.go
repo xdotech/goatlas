@@ -129,6 +129,7 @@ func (b *Builder) createIndexes(ctx context.Context) error {
 			`CREATE INDEX file_path IF NOT EXISTS FOR (f:File) ON (f.path)`,
 			`CREATE INDEX function_qualified IF NOT EXISTS FOR (fn:Function) ON (fn.qualified)`,
 			`CREATE INDEX function_name IF NOT EXISTS FOR (fn:Function) ON (fn.name)`,
+			`CREATE INDEX function_repo IF NOT EXISTS FOR (fn:Function) ON (fn.repo)`,
 			`CREATE INDEX type_qualified IF NOT EXISTS FOR (t:Type) ON (t.qualified)`,
 			`CREATE INDEX type_name IF NOT EXISTS FOR (t:Type) ON (t.name)`,
 			`CREATE INDEX service_name IF NOT EXISTS FOR (s:Service) ON (s.name)`,
@@ -142,6 +143,7 @@ func (b *Builder) createIndexes(ctx context.Context) error {
 			`CREATE INDEX IF NOT EXISTS file_path FOR (f:File) ON (f.path)`,
 			`CREATE INDEX IF NOT EXISTS function_qualified FOR (fn:Function) ON (fn.qualified)`,
 			`CREATE INDEX IF NOT EXISTS function_name FOR (fn:Function) ON (fn.name)`,
+			`CREATE INDEX IF NOT EXISTS function_repo FOR (fn:Function) ON (fn.repo)`,
 			`CREATE INDEX IF NOT EXISTS type_qualified FOR (t:Type) ON (t.qualified)`,
 			`CREATE INDEX IF NOT EXISTS type_name FOR (t:Type) ON (t.name)`,
 			`CREATE INDEX IF NOT EXISTS service_name FOR (s:Service) ON (s.name)`,
@@ -161,7 +163,11 @@ func (b *Builder) createIndexes(ctx context.Context) error {
 }
 
 func (b *Builder) buildFileNodes(ctx context.Context, result *BuildResult) error {
-	rows, err := b.pool.Query(ctx, `SELECT path, module FROM files`)
+	rows, err := b.pool.Query(ctx, `
+		SELECT f.path, f.module, r.name AS repo
+		FROM files f
+		JOIN repositories r ON f.repo_id = r.id
+	`)
 	if err != nil {
 		return err
 	}
@@ -170,11 +176,11 @@ func (b *Builder) buildFileNodes(ctx context.Context, result *BuildResult) error
 	var batch []map[string]any
 	pkgs := map[string]struct{}{}
 	for rows.Next() {
-		var path, module string
-		if err := rows.Scan(&path, &module); err != nil {
+		var path, module, repo string
+		if err := rows.Scan(&path, &module, &repo); err != nil {
 			return err
 		}
-		batch = append(batch, map[string]any{"path": path, "module": module})
+		batch = append(batch, map[string]any{"path": path, "module": module, "repo": repo})
 		pkgs[module] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
@@ -191,15 +197,17 @@ func (b *Builder) buildFileNodes(ctx context.Context, result *BuildResult) error
 		UNWIND $rows AS row
 		MERGE (pkg:Package {name: row.module})
 		MERGE (f:File {path: row.path})
-		SET f.package = row.module
+		SET f.package = row.module, f.repo = row.repo
 		MERGE (pkg)-[:DEFINES]->(f)
 	`, batch)
 }
 
 func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT s.kind, s.name, s.qualified_name, s.signature, s.line, f.path
-		FROM symbols s JOIN files f ON s.file_id = f.id
+		SELECT s.kind, s.name, s.qualified_name, s.signature, s.line, f.path, r.name AS repo
+		FROM symbols s
+		JOIN files f ON s.file_id = f.id
+		JOIN repositories r ON f.repo_id = r.id
 		WHERE s.kind IN ('func', 'method', 'struct', 'interface', 'type')
 	`)
 	if err != nil {
@@ -209,21 +217,21 @@ func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) err
 
 	var funcs, types []map[string]any
 	for rows.Next() {
-		var kind, name, qualifiedName, signature, filePath string
+		var kind, name, qualifiedName, signature, filePath, repo string
 		var line int
-		if err := rows.Scan(&kind, &name, &qualifiedName, &signature, &line, &filePath); err != nil {
+		if err := rows.Scan(&kind, &name, &qualifiedName, &signature, &line, &filePath, &repo); err != nil {
 			return err
 		}
 		switch kind {
 		case "func", "method":
 			funcs = append(funcs, map[string]any{
 				"qualified": qualifiedName, "name": name,
-				"signature": signature, "line": line, "file": filePath,
+				"signature": signature, "line": line, "file": filePath, "repo": repo,
 			})
 		default:
 			types = append(types, map[string]any{
 				"qualified": qualifiedName, "name": name,
-				"kind": kind, "line": line, "file": filePath,
+				"kind": kind, "line": line, "file": filePath, "repo": repo,
 			})
 		}
 	}
@@ -238,7 +246,7 @@ func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) err
 		if err := runBatch(ctx, b.client, `
 			UNWIND $rows AS row
 			MERGE (fn:Function {qualified: row.qualified})
-			SET fn.name = row.name, fn.signature = row.signature, fn.line = row.line
+			SET fn.name = row.name, fn.signature = row.signature, fn.line = row.line, fn.repo = row.repo
 			MERGE (f:File {path: row.file})
 			MERGE (f)-[:DEFINES]->(fn)
 		`, funcs); err != nil {
@@ -249,7 +257,7 @@ func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) err
 		if err := runBatch(ctx, b.client, `
 			UNWIND $rows AS row
 			MERGE (t:Type {qualified: row.qualified})
-			SET t.name = row.name, t.kind = row.kind, t.line = row.line
+			SET t.name = row.name, t.kind = row.kind, t.line = row.line, t.repo = row.repo
 			MERGE (f:File {path: row.file})
 			MERGE (f)-[:DEFINES]->(t)
 		`, types); err != nil {
@@ -389,8 +397,7 @@ func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResul
 
 func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line,
-		       COALESCE(fc.confidence, 0.5)
+		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line
 		FROM function_calls fc
 	`)
 	if err != nil {
@@ -403,22 +410,25 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 		var callerQName, calleeName string
 		var calleeQualified *string
 		var line int
-		var confidence float64
-		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line, &confidence); err != nil {
+		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line); err != nil {
 			return err
 		}
 		cq := ""
 		if calleeQualified != nil {
 			cq = *calleeQualified
 		}
-		row := map[string]any{
-			"caller": callerQName, "callee_qualified": cq,
-			"callee_name": calleeName, "line": line, "conf": confidence,
-		}
 		if cq != "" {
-			qualifiedBatch = append(qualifiedBatch, row)
+			// Direct qualified call — high confidence
+			qualifiedBatch = append(qualifiedBatch, map[string]any{
+				"caller": callerQName, "callee_qualified": cq,
+				"callee_name": calleeName, "line": line, "conf": 0.9,
+			})
 		} else {
-			nameBatch = append(nameBatch, row)
+			// Name-only call — lower confidence (callee resolved by name only)
+			nameBatch = append(nameBatch, map[string]any{
+				"caller": callerQName, "callee_qualified": cq,
+				"callee_name": calleeName, "line": line, "conf": 0.6,
+			})
 		}
 	}
 	if err := rows.Err(); err != nil {

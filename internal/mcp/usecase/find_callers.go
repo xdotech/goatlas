@@ -3,8 +3,10 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
+	"github.com/xdotech/goatlas/internal/graph"
 	"github.com/xdotech/goatlas/internal/indexer/domain"
 )
 
@@ -13,18 +15,33 @@ import (
 type FindCallersUseCase struct {
 	symbolRepo domain.SymbolRepository
 	iiRepo     domain.InterfaceImplRepository
+	querier    *graph.Querier // optional: used when Neo4j graph is available
 }
 
 // NewFindCallersUseCase constructs a FindCallersUseCase.
-func NewFindCallersUseCase(sr domain.SymbolRepository, iiRepo domain.InterfaceImplRepository) *FindCallersUseCase {
-	return &FindCallersUseCase{symbolRepo: sr, iiRepo: iiRepo}
+func NewFindCallersUseCase(sr domain.SymbolRepository, iiRepo domain.InterfaceImplRepository, querier *graph.Querier) *FindCallersUseCase {
+	return &FindCallersUseCase{symbolRepo: sr, iiRepo: iiRepo, querier: querier}
 }
 
 // Execute searches for references/callers of the given function name.
-// If the function name contains a dot (e.g. "Repository.FindByID"), it will
-// also resolve interface implementations and search for callers of the concrete methods.
-func (uc *FindCallersUseCase) Execute(ctx context.Context, functionName string) (string, error) {
-	// Resolve interface methods → concrete implementations
+// When a Neo4j graph querier is available, it uses graph-based CALLS traversal.
+// depth controls how deep to traverse (default: 5). repo restricts to one repo (optional).
+func (uc *FindCallersUseCase) Execute(ctx context.Context, functionName string, depth int, repo string) (string, error) {
+	if depth <= 0 {
+		depth = 5
+	}
+
+	// Prefer graph-based callers when Neo4j is available
+	if uc.querier != nil {
+		callers, err := uc.querier.FindCallers(ctx, functionName, depth, 0.0, repo)
+		if err == nil {
+			return uc.querier.FormatCallers(functionName, callers), nil
+		}
+		// Log and fall back to postgres on transient graph error
+		log.Printf("WARN find_callers: graph query failed (%v), falling back to postgres symbol search", err)
+	}
+
+	// Postgres fallback: resolve interface methods → concrete implementations
 	searchNames := []string{functionName}
 
 	if uc.iiRepo != nil {
@@ -33,7 +50,6 @@ func (uc *FindCallersUseCase) Execute(ctx context.Context, functionName string) 
 			impls, err := uc.iiRepo.FindImplementations(ctx, interfaceName, methodName)
 			if err == nil && len(impls) > 0 {
 				for _, impl := range impls {
-					// Add concrete method qualified names: pkg.(Struct).Method
 					searchNames = append(searchNames, impl.StructName+"."+impl.MethodName)
 				}
 			}
@@ -58,11 +74,11 @@ func (uc *FindCallersUseCase) Execute(ctx context.Context, functionName string) 
 	}
 
 	if len(allSymbols) == 0 {
-		return fmt.Sprintf("No callers found for %q", functionName), nil
+		return fmt.Sprintf("No callers found for %q\n(Tip: run build_graph to enable graph-based caller search)", functionName), nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Potential callers/references for %q", functionName))
+	sb.WriteString(fmt.Sprintf("Name matches for %q (no graph — run build_graph for true callers)", functionName))
 	if len(searchNames) > 1 {
 		sb.WriteString(fmt.Sprintf(" (+ %d concrete implementations)", len(searchNames)-1))
 	}

@@ -19,7 +19,8 @@ func NewAnalyzeImpactUseCase(querier *graph.Querier) *AnalyzeImpactUseCase {
 }
 
 // Execute performs impact analysis for a given symbol.
-func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxDepth int) (string, error) {
+// repo optionally restricts results to a single repository (empty = all repos).
+func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxDepth int, repo string) (string, error) {
 	if uc.querier == nil {
 		return "Impact analysis requires Neo4j graph. Build the graph first with build_graph.", nil
 	}
@@ -27,7 +28,7 @@ func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxD
 		maxDepth = 5
 	}
 
-	report, err := uc.querier.AnalyzeImpact(ctx, symbol, maxDepth)
+	report, err := uc.querier.AnalyzeImpact(ctx, symbol, maxDepth, repo)
 	if err != nil {
 		return "", err
 	}
@@ -35,14 +36,16 @@ func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxD
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Impact analysis for %q:\n\n", symbol)
 
-	// Group callers by depth
+	// Group callers by depth and type
 	if len(report.Callers) == 0 {
 		sb.WriteString("  No callers found in the graph.\n")
 	} else {
-		// Direct callers (depth 1)
-		var direct, transitive []graph.CallerResult
+		// Separate graph callers from name-match fallbacks
+		var direct, transitive, nameMatches []graph.CallerResult
 		for _, c := range report.Callers {
-			if c.Depth == 1 {
+			if c.IsNameMatch {
+				nameMatches = append(nameMatches, c)
+			} else if c.Depth == 1 {
 				direct = append(direct, c)
 			} else {
 				transitive = append(transitive, c)
@@ -69,6 +72,14 @@ func (uc *AnalyzeImpactUseCase) Execute(ctx context.Context, symbol string, maxD
 					fmt.Fprintf(&sb, " @ %s:%d", c.File, c.Line)
 				}
 				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(nameMatches) > 0 {
+			fmt.Fprintf(&sb, "Name matches (no graph — run build_graph for true callers): %d\n", len(nameMatches))
+			for _, c := range nameMatches {
+				fmt.Fprintf(&sb, "  - %s\n", c.QualifiedName)
 			}
 			sb.WriteString("\n")
 		}
