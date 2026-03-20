@@ -57,7 +57,7 @@ func NewToolBridge(uc *UseCases) *ToolBridge {
 	}
 
 	b.handlers["find_callers"] = func(ctx context.Context, args map[string]interface{}) (string, error) {
-		return uc.FindCallers.Execute(ctx, getString(args, "function_name", ""))
+		return uc.FindCallers.Execute(ctx, getString(args, "function_name", ""), getInt(args, "depth", 5), getString(args, "repo", ""))
 	}
 
 	b.handlers["list_api_endpoints"] = func(ctx context.Context, args map[string]interface{}) (string, error) {

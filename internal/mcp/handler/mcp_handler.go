@@ -139,13 +139,15 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 	})
 
 	srv.AddTool(mcp.NewTool("find_callers",
-		mcp.WithDescription("Find functions that reference the given function name"),
+		mcp.WithDescription("Find functions that call the given function name. Uses Neo4j graph when available, falls back to name matching."),
 		mcp.WithString("function_name", mcp.Required(), mcp.Description("Function name to find callers for")),
-		mcp.WithNumber("min_confidence", mcp.Description("Minimum confidence threshold 0.0-1.0 (default: 0.0 = all)")),
+		mcp.WithNumber("depth", mcp.Description("Max call graph depth to traverse (default: 5)")),
+		mcp.WithString("repo", mcp.Description("Restrict results to a specific repository name (optional)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		fnName := req.GetString("function_name", "")
-		_ = req.GetFloat("min_confidence", 0.0) // TODO: pass to graph-based FindCallers when available
-		result, err := h.findCallers.Execute(ctx, fnName)
+		depth := req.GetInt("depth", 5)
+		repo := req.GetString("repo", "")
+		result, err := h.findCallers.Execute(ctx, fnName, depth, repo)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -300,12 +302,12 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		mcp.WithDescription("Analyze change impact: when modifying a function, find all affected callers, API endpoints, and UI components. Uses recursive call graph traversal."),
 		mcp.WithString("symbol", mcp.Required(), mcp.Description("Function or method name to analyze impact for")),
 		mcp.WithNumber("max_depth", mcp.Description("Maximum call graph depth to traverse (default: 5)")),
-		mcp.WithNumber("min_confidence", mcp.Description("Minimum confidence threshold 0.0-1.0 (default: 0.0 = all)")),
+		mcp.WithString("repo", mcp.Description("Restrict analysis to a specific repository name (optional)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		symbol := req.GetString("symbol", "")
-		maxDepth := int(req.GetFloat("max_depth", 5))
-		_ = req.GetFloat("min_confidence", 0.0) // TODO: pass through when AnalyzeImpact supports it
-		result, err := h.analyzeImpact.Execute(ctx, symbol, maxDepth)
+		maxDepth := req.GetInt("max_depth", 5)
+		repo := req.GetString("repo", "")
+		result, err := h.analyzeImpact.Execute(ctx, symbol, maxDepth, repo)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}

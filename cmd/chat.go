@@ -51,7 +51,7 @@ var chatCmd = &cobra.Command{
 			SearchCode:     mcpusecase.NewSearchCodeUseCase(indexerSvc.SymbolRepo, nil, cfg.RepoPath, 0),
 			ReadFile:       mcpusecase.NewReadFileUseCase(pool),
 			FindSymbol:     mcpusecase.NewFindSymbolUseCase(indexerSvc.SymbolRepo, cfg.RepoPath),
-			FindCallers:    mcpusecase.NewFindCallersUseCase(indexerSvc.SymbolRepo, indexerSvc.IIRepo),
+			FindCallers:    mcpusecase.NewFindCallersUseCase(indexerSvc.SymbolRepo, indexerSvc.IIRepo, querier),
 			ListEndpoints:  mcpusecase.NewListEndpointsUseCase(indexerSvc.EndpointRepo),
 			GetFileSymbols: mcpusecase.NewGetFileSymbolsUseCase(pool, indexerSvc.SymbolRepo),
 			ListServices:   mcpusecase.NewListServicesUseCase(pool),
