@@ -33,6 +33,23 @@ type BuildResult struct {
 	ImplementsEdges int
 }
 
+// batchSize controls how many rows are sent per UNWIND transaction.
+const batchSize = 500
+
+// runBatch executes cypher with UNWIND $rows in chunks to avoid large transactions.
+func runBatch(ctx context.Context, client *Client, cypher string, rows []map[string]any) error {
+	for i := 0; i < len(rows); i += batchSize {
+		end := i + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		if err := client.RunCypher(ctx, cypher, map[string]any{"rows": rows[i:end]}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Build populates the Neo4j graph from the PostgreSQL index.
 func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	result := &BuildResult{}
@@ -73,6 +90,12 @@ func (b *Builder) createIndexes(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS package_name FOR (p:Package) ON (p.name)`,
 		`CREATE INDEX IF NOT EXISTS file_path FOR (f:File) ON (f.path)`,
 		`CREATE INDEX IF NOT EXISTS function_qualified FOR (fn:Function) ON (fn.qualified)`,
+		`CREATE INDEX IF NOT EXISTS function_name FOR (fn:Function) ON (fn.name)`,
+		`CREATE INDEX IF NOT EXISTS type_qualified FOR (t:Type) ON (t.qualified)`,
+		`CREATE INDEX IF NOT EXISTS type_name FOR (t:Type) ON (t.name)`,
+		`CREATE INDEX IF NOT EXISTS service_name FOR (s:Service) ON (s.name)`,
+		`CREATE INDEX IF NOT EXISTS topic_name FOR (tp:Topic) ON (tp.name)`,
+		`CREATE INDEX IF NOT EXISTS endpoint_path FOR (ep:Endpoint) ON (ep.path)`,
 	}
 	for _, idx := range indexes {
 		// Non-fatal: older Neo4j versions may use different syntax.
@@ -82,50 +105,39 @@ func (b *Builder) createIndexes(ctx context.Context) error {
 }
 
 func (b *Builder) buildFileNodes(ctx context.Context, result *BuildResult) error {
-	rows, err := b.pool.Query(ctx, `SELECT id, path, module FROM files`)
+	rows, err := b.pool.Query(ctx, `SELECT path, module FROM files`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	type fileRec struct {
-		ID     int64
-		Path   string
-		Module string
-	}
-
-	var batch []fileRec
+	var batch []map[string]any
+	pkgs := map[string]struct{}{}
 	for rows.Next() {
-		var r fileRec
-		if err := rows.Scan(&r.ID, &r.Path, &r.Module); err != nil {
+		var path, module string
+		if err := rows.Scan(&path, &module); err != nil {
 			return err
 		}
-		batch = append(batch, r)
+		batch = append(batch, map[string]any{"path": path, "module": module})
+		pkgs[module] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	rows.Close()
 
-	pkgs := map[string]struct{}{}
-	for _, r := range batch {
-		cypher := `
-			MERGE (pkg:Package {name: $module})
-			MERGE (f:File {path: $path})
-			SET f.package = $module
-			MERGE (pkg)-[:DEFINES]->(f)
-		`
-		if err := b.client.RunCypher(ctx, cypher, map[string]any{
-			"module": r.Module,
-			"path":   r.Path,
-		}); err != nil {
-			return err
-		}
-		pkgs[r.Module] = struct{}{}
-		result.FileNodes++
-	}
+	result.FileNodes = len(batch)
 	result.PackageNodes = len(pkgs)
-	return nil
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MERGE (pkg:Package {name: row.module})
+		MERGE (f:File {path: row.path})
+		SET f.package = row.module
+		MERGE (pkg)-[:DEFINES]->(f)
+	`, batch)
 }
 
 func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) error {
@@ -139,54 +151,56 @@ func (b *Builder) buildSymbolNodes(ctx context.Context, result *BuildResult) err
 	}
 	defer rows.Close()
 
+	var funcs, types []map[string]any
 	for rows.Next() {
 		var kind, name, qualifiedName, signature, filePath string
 		var line int
 		if err := rows.Scan(&kind, &name, &qualifiedName, &signature, &line, &filePath); err != nil {
 			return err
 		}
-
-		var cypher string
-		var params map[string]any
-
 		switch kind {
 		case "func", "method":
-			cypher = `
-				MERGE (fn:Function {qualified: $qualified})
-				SET fn.name = $name, fn.signature = $signature, fn.line = $line
-				MERGE (f:File {path: $file})
-				MERGE (f)-[:DEFINES]->(fn)
-			`
-			params = map[string]any{
-				"qualified": qualifiedName,
-				"name":      name,
-				"signature": signature,
-				"line":      line,
-				"file":      filePath,
-			}
-			result.FunctionNodes++
+			funcs = append(funcs, map[string]any{
+				"qualified": qualifiedName, "name": name,
+				"signature": signature, "line": line, "file": filePath,
+			})
 		default:
-			cypher = `
-				MERGE (t:Type {qualified: $qualified})
-				SET t.name = $name, t.kind = $kind, t.line = $line
-				MERGE (f:File {path: $file})
-				MERGE (f)-[:DEFINES]->(t)
-			`
-			params = map[string]any{
-				"qualified": qualifiedName,
-				"name":      name,
-				"kind":      kind,
-				"line":      line,
-				"file":      filePath,
-			}
-			result.TypeNodes++
+			types = append(types, map[string]any{
+				"qualified": qualifiedName, "name": name,
+				"kind": kind, "line": line, "file": filePath,
+			})
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+	result.FunctionNodes = len(funcs)
+	result.TypeNodes = len(types)
+
+	if len(funcs) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (fn:Function {qualified: row.qualified})
+			SET fn.name = row.name, fn.signature = row.signature, fn.line = row.line
+			MERGE (f:File {path: row.file})
+			MERGE (f)-[:DEFINES]->(fn)
+		`, funcs); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	if len(types) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (t:Type {qualified: row.qualified})
+			SET t.name = row.name, t.kind = row.kind, t.line = row.line
+			MERGE (f:File {path: row.file})
+			MERGE (f)-[:DEFINES]->(t)
+		`, types); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *Builder) buildImportEdges(ctx context.Context, result *BuildResult) error {
@@ -199,105 +213,129 @@ func (b *Builder) buildImportEdges(ctx context.Context, result *BuildResult) err
 	}
 	defer rows.Close()
 
+	var batch []map[string]any
 	for rows.Next() {
 		var fromPath, importPath string
 		if err := rows.Scan(&fromPath, &importPath); err != nil {
 			return err
 		}
-		cypher := `
-			MERGE (importer:File {path: $fromPath})
-			MERGE (imported:Package {name: $importPath})
-			MERGE (importer)-[:IMPORTS]->(imported)
-		`
-		if err := b.client.RunCypher(ctx, cypher, map[string]any{
-			"fromPath":   fromPath,
-			"importPath": importPath,
-		}); err != nil {
-			return err
-		}
-		result.ImportEdges++
+		batch = append(batch, map[string]any{"from_path": fromPath, "import_path": importPath})
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	result.ImportEdges = len(batch)
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MERGE (importer:File {path: row.from_path})
+		MERGE (imported:Package {name: row.import_path})
+		MERGE (importer)-[:IMPORTS]->(imported)
+	`, batch)
 }
 
 func (b *Builder) buildServiceConnections(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
-		SELECT r.name, sc.conn_type, sc.target, sc.line, f.path
+		SELECT r.name, sc.conn_type, sc.target, sc.line
 		FROM service_connections sc
 		JOIN repositories r ON sc.repo_id = r.id
-		LEFT JOIN files f ON sc.file_id = f.id
 	`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
+	type connRow struct {
+		source, connType, target string
+		line                     int
+	}
+	var all []connRow
 	services := map[string]struct{}{}
 	for rows.Next() {
-		var repoName, connType, target string
-		var line int
-		var filePath *string
-		if err := rows.Scan(&repoName, &connType, &target, &line, &filePath); err != nil {
+		var r connRow
+		if err := rows.Scan(&r.source, &r.connType, &r.target, &r.line); err != nil {
 			return err
 		}
-
-		// Create Service node for the source repo
-		if _, exists := services[repoName]; !exists {
-			cypher := `MERGE (s:Service {name: $name})`
-			if err := b.client.RunCypher(ctx, cypher, map[string]any{"name": repoName}); err != nil {
-				return err
-			}
-			services[repoName] = struct{}{}
-			result.ServiceNodes++
-		}
-
-		// Create appropriate edge based on connection type
-		var cypher string
-		params := map[string]any{
-			"source": repoName,
-			"target": target,
-			"line":   line,
-		}
-
-		switch connType {
-		case "grpc":
-			cypher = `
-				MERGE (src:Service {name: $source})
-				MERGE (tgt:Service {name: $target})
-				MERGE (src)-[:CALLS_GRPC {target: $target, line: $line}]->(tgt)
-			`
-		case "kafka_publish":
-			cypher = `
-				MERGE (src:Service {name: $source})
-				MERGE (topic:Topic {name: $target})
-				MERGE (src)-[:PUBLISHES {line: $line}]->(topic)
-			`
-		case "kafka_consume":
-			cypher = `
-				MERGE (src:Service {name: $source})
-				MERGE (topic:Topic {name: $target})
-				MERGE (src)-[:SUBSCRIBES {line: $line}]->(topic)
-			`
-		case "http_api":
-			cypher = `
-				MERGE (src:Service {name: $source})
-				MERGE (tgt:Service {name: $target})
-				MERGE (src)-[:CALLS_API {line: $line}]->(tgt)
-			`
-		default:
-			continue
-		}
-
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
-			return err
-		}
-		result.ConnectionEdges++
+		all = append(all, r)
+		services[r.source] = struct{}{}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	result.ServiceNodes = len(services)
+	result.ConnectionEdges = len(all)
+	if len(all) == 0 {
+		return nil
+	}
+
+	// Group by connection type and run one UNWIND batch per type.
+	grpc := make([]map[string]any, 0)
+	kafkaPub := make([]map[string]any, 0)
+	kafkaSub := make([]map[string]any, 0)
+	httpAPI := make([]map[string]any, 0)
+
+	for _, r := range all {
+		row := map[string]any{"source": r.source, "target": r.target, "line": r.line}
+		switch r.connType {
+		case "grpc":
+			grpc = append(grpc, row)
+		case "kafka_publish":
+			kafkaPub = append(kafkaPub, row)
+		case "kafka_consume":
+			kafkaSub = append(kafkaSub, row)
+		case "http_api":
+			httpAPI = append(httpAPI, row)
+		}
+	}
+
+	if len(grpc) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (src:Service {name: row.source})
+			MERGE (tgt:Service {name: row.target})
+			MERGE (src)-[:CALLS_GRPC {target: row.target, line: row.line}]->(tgt)
+		`, grpc); err != nil {
+			return err
+		}
+	}
+	if len(kafkaPub) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (src:Service {name: row.source})
+			MERGE (topic:Topic {name: row.target})
+			MERGE (src)-[:PUBLISHES {line: row.line}]->(topic)
+		`, kafkaPub); err != nil {
+			return err
+		}
+	}
+	if len(kafkaSub) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (src:Service {name: row.source})
+			MERGE (topic:Topic {name: row.target})
+			MERGE (src)-[:SUBSCRIBES {line: row.line}]->(topic)
+		`, kafkaSub); err != nil {
+			return err
+		}
+	}
+	if len(httpAPI) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MERGE (src:Service {name: row.source})
+			MERGE (tgt:Service {name: row.target})
+			MERGE (src)-[:CALLS_API {line: row.line}]->(tgt)
+		`, httpAPI); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// buildComponentAPIEdges creates Component nodes and CALLS_API edges
-// from the component_api_calls table.
 func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
 		SELECT c.component, c.http_method, c.api_path, c.target_service, f.path
@@ -309,34 +347,34 @@ func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResul
 	}
 	defer rows.Close()
 
+	var batch []map[string]any
 	for rows.Next() {
 		var component, method, apiPath, targetService, filePath string
 		if err := rows.Scan(&component, &method, &apiPath, &targetService, &filePath); err != nil {
 			return err
 		}
-
-		cypher := `
-			MERGE (comp:Component {name: $component, file: $file})
-			MERGE (ep:Endpoint {path: $api_path})
-			MERGE (comp)-[:CALLS_API {method: $method, service: $service}]->(ep)
-		`
-		params := map[string]any{
-			"component": component,
-			"file":      filePath,
-			"api_path":  apiPath,
-			"method":    method,
-			"service":   targetService,
-		}
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
-			return err
-		}
-		result.ComponentEdges++
+		batch = append(batch, map[string]any{
+			"component": component, "file": filePath,
+			"api_path": apiPath, "method": method, "service": targetService,
+		})
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	result.ComponentEdges = len(batch)
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MERGE (comp:Component {name: row.component, file: row.file})
+		MERGE (ep:Endpoint {path: row.api_path})
+		MERGE (comp)-[:CALLS_API {method: row.method, service: row.service}]->(ep)
+	`, batch)
 }
 
-// buildCallEdges creates CALLS edges between Function nodes
-// from the function_calls table.
 func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
 		SELECT fc.caller_qualified_name, fc.callee_name, fc.callee_package, fc.line,
@@ -348,6 +386,7 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 	}
 	defer rows.Close()
 
+	var batch []map[string]any
 	for rows.Next() {
 		var callerQName, calleeName string
 		var calleeQualified *string
@@ -356,37 +395,33 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 		if err := rows.Scan(&callerQName, &calleeName, &calleeQualified, &line, &confidence); err != nil {
 			return err
 		}
-
 		cq := ""
 		if calleeQualified != nil {
 			cq = *calleeQualified
 		}
-
-		cypher := `
-			MATCH (caller:Function {qualified: $caller})
-			MATCH (callee:Function)
-			WHERE callee.qualified = $callee_qualified
-			   OR callee.name = $callee_name
-			MERGE (caller)-[:CALLS {line: $line, confidence: $conf}]->(callee)
-		`
-		params := map[string]any{
-			"caller":           callerQName,
-			"callee_qualified": cq,
-			"callee_name":      calleeName,
-			"line":             line,
-			"conf":             confidence,
-		}
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
-			return err
-		}
-		result.CallEdges++
+		batch = append(batch, map[string]any{
+			"caller": callerQName, "callee_qualified": cq,
+			"callee_name": calleeName, "line": line, "conf": confidence,
+		})
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
+	result.CallEdges = len(batch)
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MATCH (caller:Function {qualified: row.caller})
+		MATCH (callee:Function)
+		WHERE callee.qualified = row.callee_qualified OR callee.name = row.callee_name
+		MERGE (caller)-[:CALLS {line: row.line, confidence: row.conf}]->(callee)
+	`, batch)
 }
 
-// buildTypeFlowEdges creates ACCEPTS and RETURNS edges between Function and Type nodes
-// from the type_usages table.
 func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
 		SELECT tu.symbol_name, tu.type_name, tu.direction, tu.position
@@ -397,46 +432,52 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 	}
 	defer rows.Close()
 
+	var inputs, outputs []map[string]any
 	for rows.Next() {
 		var symbolName, typeName, direction string
 		var position int
 		if err := rows.Scan(&symbolName, &typeName, &direction, &position); err != nil {
 			return err
 		}
-
-		var cypher string
+		row := map[string]any{"symbol": symbolName, "type_name": typeName, "pos": position}
 		switch direction {
 		case "input":
-			cypher = `
-				MATCH (fn:Function)
-				WHERE fn.qualified = $symbol OR fn.name = $symbol
-				MERGE (t:Type {name: $type_name})
-				MERGE (fn)-[:ACCEPTS {pos: $pos}]->(t)`
+			inputs = append(inputs, row)
 		case "output":
-			cypher = `
-				MATCH (fn:Function)
-				WHERE fn.qualified = $symbol OR fn.name = $symbol
-				MERGE (t:Type {name: $type_name})
-				MERGE (fn)-[:RETURNS {pos: $pos}]->(t)`
-		default:
-			continue
+			outputs = append(outputs, row)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
-		params := map[string]any{
-			"symbol":    symbolName,
-			"type_name": typeName,
-			"pos":       position,
-		}
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
+	result.TypeFlowEdges = len(inputs) + len(outputs)
+
+	if len(inputs) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (fn:Function)
+			WHERE fn.qualified = row.symbol OR fn.name = row.symbol
+			MERGE (t:Type {name: row.type_name})
+			MERGE (fn)-[:ACCEPTS {pos: row.pos}]->(t)
+		`, inputs); err != nil {
 			return err
 		}
-		result.TypeFlowEdges++
 	}
-	return rows.Err()
+	if len(outputs) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (fn:Function)
+			WHERE fn.qualified = row.symbol OR fn.name = row.symbol
+			MERGE (t:Type {name: row.type_name})
+			MERGE (fn)-[:RETURNS {pos: row.pos}]->(t)
+		`, outputs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// buildImplementsEdges creates IMPLEMENTS edges between struct method (Function)
-// and interface (Type) nodes, using data from the interface_impls table.
 func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult) error {
 	rows, err := b.pool.Query(ctx, `
 		SELECT interface_name, struct_name, method_name, COALESCE(confidence, 0.85)
@@ -447,29 +488,32 @@ func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult)
 	}
 	defer rows.Close()
 
+	var batch []map[string]any
 	for rows.Next() {
 		var interfaceName, structName, methodName string
 		var confidence float64
 		if err := rows.Scan(&interfaceName, &structName, &methodName, &confidence); err != nil {
 			return err
 		}
-
-		cypher := `
-			MATCH (fn:Function)
-			WHERE fn.qualified CONTAINS $struct_name AND fn.name = $method
-			MERGE (iface:Type {name: $iface_name})
-			MERGE (fn)-[:IMPLEMENTS {method: $method, confidence: $conf}]->(iface)
-		`
-		params := map[string]any{
-			"struct_name": structName,
-			"method":      methodName,
-			"iface_name":  interfaceName,
-			"conf":        confidence,
-		}
-		if err := b.client.RunCypher(ctx, cypher, params); err != nil {
-			return err
-		}
-		result.ImplementsEdges++
+		batch = append(batch, map[string]any{
+			"iface_name": interfaceName, "struct_name": structName,
+			"method": methodName, "conf": confidence,
+		})
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	result.ImplementsEdges = len(batch)
+	if len(batch) == 0 {
+		return nil
+	}
+
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MATCH (fn:Function)
+		WHERE fn.qualified CONTAINS row.struct_name AND fn.name = row.method
+		MERGE (iface:Type {name: row.iface_name})
+		MERGE (fn)-[:IMPLEMENTS {method: row.method, confidence: row.conf}]->(iface)
+	`, batch)
 }
