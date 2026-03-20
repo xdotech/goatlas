@@ -7,18 +7,65 @@ before:
     - go mod tidy
 
 builds:
-  - id: goatlas
+  - id: goatlas-linux-amd64
     main: ./main.go
     binary: goatlas
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CC=gcc
     goos:
       - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: goatlas-linux-arm64
+    main: ./main.go
+    binary: goatlas
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: goatlas-darwin
+    main: ./main.go
+    binary: goatlas
+    env:
+      - CGO_ENABLED=1
+      - CC=o64-clang
+    goos:
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: goatlas-windows
+    main: ./main.go
+    binary: goatlas
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+    goos:
+      - windows
+    goarch:
+      - amd64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
