@@ -100,7 +100,7 @@ func (h *MCPHandler) RegisterTools(srv *server.MCPServer) {
 		query := req.GetString("query", "")
 		limit := req.GetInt("limit", 20)
 		kind := req.GetString("kind", "")
-		mode := req.GetString("mode", "keyword")
+		mode := req.GetString("mode", "hybrid")
 		result, err := h.searchCode.Execute(ctx, query, limit, kind, mode)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
