@@ -49,13 +49,14 @@ var embedCmd = &cobra.Command{
 		}
 
 		embedCfg := vector.EmbedConfig{
-			Provider:      cfg.EmbedProvider,
-			GeminiKey:     cfg.GeminiAPIKey,
-			OllamaURL:     cfg.OllamaURL,
-			OllamaModel:   cfg.OllamaEmbedModel,
-			OpenAIBaseURL: cfg.OpenAIBaseURL,
-			OpenAIAPIKey:  cfg.OpenAIAPIKey,
-			OpenAIModel:   cfg.OpenAIEmbedModel,
+			Provider:           cfg.EmbedProvider,
+			GeminiKey:          cfg.GeminiAPIKey,
+			OllamaURL:          cfg.OllamaURL,
+			OllamaModel:        cfg.OllamaEmbedModel,
+			OpenAIBaseURL:      cfg.OpenAIBaseURL,
+			OpenAIEmbedBaseURL: cfg.OpenAIEmbedBaseURL,
+			OpenAIAPIKey:       cfg.OpenAIAPIKey,
+			OpenAIModel:        cfg.OpenAIEmbedModel,
 		}
 		embedder, err := vector.NewEmbedder(ctx, embedCfg)
 		if err != nil {

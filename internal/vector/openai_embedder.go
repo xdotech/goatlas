@@ -20,7 +20,10 @@ type openaiEmbedder struct {
 }
 
 func newOpenAIEmbedder(cfg EmbedConfig) (*openaiEmbedder, error) {
-	url := cfg.OpenAIBaseURL
+	url := cfg.OpenAIEmbedBaseURL
+	if url == "" {
+		url = cfg.OpenAIBaseURL
+	}
 	if url == "" {
 		url = "http://localhost:8001/v1"
 	}

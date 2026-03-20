@@ -27,10 +27,11 @@ type Config struct {
 	OllamaModel      string // chat model, e.g. "llama3.2"
 	OllamaEmbedModel string // embedding model, e.g. "nomic-embed-text"
 	// OpenAI-compatible settings (used when provider is "openai")
-	OpenAIBaseURL    string // e.g. "http://10.1.1.246:8001/v1"
-	OpenAIAPIKey     string // API key (use "ignored" for servers that don't require auth)
-	OpenAIModel      string // chat model, e.g. "qwen3.5-35b"
-	OpenAIEmbedModel string // embedding model, e.g. "text-embedding-ada-002"
+	OpenAIBaseURL      string // e.g. "http://10.1.1.246:8001/v1"
+	OpenAIAPIKey       string // API key (use "ignored" for servers that don't require auth)
+	OpenAIModel        string // chat model, e.g. "qwen3.5-35b"
+	OpenAIEmbedModel   string // embedding model, e.g. "text-embedding-ada-002"
+	OpenAIEmbedBaseURL string // separate base URL for embeddings (falls back to OpenAIBaseURL)
 	OpenAIDisableThinking bool // disable reasoning/thinking mode (e.g. Qwen3)
 }
 
@@ -81,10 +82,11 @@ func Load() (*Config, error) {
 		OllamaURL:        viper.GetString("OLLAMA_URL"),
 		OllamaModel:      viper.GetString("OLLAMA_MODEL"),
 		OllamaEmbedModel: viper.GetString("OLLAMA_EMBED_MODEL"),
-		OpenAIBaseURL:    viper.GetString("OPENAI_BASE_URL"),
-		OpenAIAPIKey:     viper.GetString("OPENAI_API_KEY"),
-		OpenAIModel:      viper.GetString("OPENAI_MODEL"),
-		OpenAIEmbedModel: viper.GetString("OPENAI_EMBED_MODEL"),
+		OpenAIBaseURL:      viper.GetString("OPENAI_BASE_URL"),
+		OpenAIAPIKey:       viper.GetString("OPENAI_API_KEY"),
+		OpenAIModel:        viper.GetString("OPENAI_MODEL"),
+		OpenAIEmbedModel:   viper.GetString("OPENAI_EMBED_MODEL"),
+		OpenAIEmbedBaseURL: viper.GetString("OPENAI_EMBED_BASE_URL"),
 		OpenAIDisableThinking: viper.GetBool("OPENAI_DISABLE_THINKING"),
 	}, nil
 }

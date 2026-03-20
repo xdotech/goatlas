@@ -16,9 +16,10 @@ type EmbedConfig struct {
 	OllamaURL string // default: http://localhost:11434
 	OllamaModel string // default: nomic-embed-text
 	// OpenAI-compatible API settings
-	OpenAIBaseURL string // e.g. "http://10.1.1.246:8001/v1"
-	OpenAIAPIKey  string
-	OpenAIModel   string // e.g. "text-embedding-ada-002"
+	OpenAIBaseURL      string // e.g. "http://10.1.1.246:8001/v1"
+	OpenAIEmbedBaseURL string // separate base URL for embeddings (falls back to OpenAIBaseURL)
+	OpenAIAPIKey       string
+	OpenAIModel        string // e.g. "text-embedding-ada-002"
 }
 
 // NewEmbedder returns the Embedder implementation for the configured provider.
