@@ -273,67 +273,23 @@ func (b *Builder) buildServiceConnections(ctx context.Context, result *BuildResu
 		return nil
 	}
 
-	// Group by connection type and run one UNWIND batch per type.
-	grpc := make([]map[string]any, 0)
-	kafkaPub := make([]map[string]any, 0)
-	kafkaSub := make([]map[string]any, 0)
-	httpAPI := make([]map[string]any, 0)
-
+	batch := make([]map[string]any, 0, len(all))
 	for _, r := range all {
-		row := map[string]any{"source": r.source, "target": r.target, "line": r.line}
-		switch r.connType {
-		case "grpc":
-			grpc = append(grpc, row)
-		case "kafka_publish":
-			kafkaPub = append(kafkaPub, row)
-		case "kafka_consume":
-			kafkaSub = append(kafkaSub, row)
-		case "http_api":
-			httpAPI = append(httpAPI, row)
-		}
+		batch = append(batch, map[string]any{
+			"source":    r.source,
+			"target":    r.target,
+			"conn_type": r.connType,
+			"line":      r.line,
+		})
 	}
 
-	if len(grpc) > 0 {
-		if err := runBatch(ctx, b.client, `
-			UNWIND $rows AS row
-			MERGE (src:Service {name: row.source})
-			MERGE (tgt:Service {name: row.target})
-			MERGE (src)-[:CALLS_GRPC {target: row.target, line: row.line}]->(tgt)
-		`, grpc); err != nil {
-			return err
-		}
-	}
-	if len(kafkaPub) > 0 {
-		if err := runBatch(ctx, b.client, `
-			UNWIND $rows AS row
-			MERGE (src:Service {name: row.source})
-			MERGE (topic:Topic {name: row.target})
-			MERGE (src)-[:PUBLISHES {line: row.line}]->(topic)
-		`, kafkaPub); err != nil {
-			return err
-		}
-	}
-	if len(kafkaSub) > 0 {
-		if err := runBatch(ctx, b.client, `
-			UNWIND $rows AS row
-			MERGE (src:Service {name: row.source})
-			MERGE (topic:Topic {name: row.target})
-			MERGE (src)-[:SUBSCRIBES {line: row.line}]->(topic)
-		`, kafkaSub); err != nil {
-			return err
-		}
-	}
-	if len(httpAPI) > 0 {
-		if err := runBatch(ctx, b.client, `
-			UNWIND $rows AS row
-			MERGE (src:Service {name: row.source})
-			MERGE (tgt:Service {name: row.target})
-			MERGE (src)-[:CALLS_API {line: row.line}]->(tgt)
-		`, httpAPI); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runBatch(ctx, b.client, `
+		UNWIND $rows AS row
+		MERGE (src:Service {name: row.source})
+		MERGE (tgt:Service {name: row.target})
+		MERGE (src)-[r:CONNECTS]->(tgt)
+		SET r.conn_type = row.conn_type, r.line = row.line
+	`, batch)
 }
 
 func (b *Builder) buildComponentAPIEdges(ctx context.Context, result *BuildResult) error {
