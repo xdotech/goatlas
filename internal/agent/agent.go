@@ -16,6 +16,8 @@ func NewAgent(ctx context.Context, cfg AgentConfig, provCfg ProviderConfig, brid
 	switch provCfg.Provider {
 	case "ollama":
 		provider, err = newOllamaProvider(cfg, provCfg, bridge, systemPrompt)
+	case "openai":
+		provider, err = newOpenAIProvider(cfg, provCfg, bridge, systemPrompt)
 	default:
 		provider, err = newGeminiProvider(ctx, cfg, provCfg.GeminiKey, bridge, systemPrompt)
 	}

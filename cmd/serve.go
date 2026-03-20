@@ -52,7 +52,7 @@ var serveCmd = &cobra.Command{
 
 		// Select vector store: Qdrant if configured, otherwise pgvector (default).
 		var vectorSearcher *vector.Searcher
-		embedEnabled := cfg.EmbedProvider == "ollama" || cfg.GeminiAPIKey != ""
+		embedEnabled := cfg.EmbedProvider == "ollama" || cfg.EmbedProvider == "openai" || cfg.GeminiAPIKey != ""
 		if embedEnabled {
 			var store vector.VectorStore
 			if cfg.QdrantURL != "" {
@@ -71,10 +71,13 @@ var serveCmd = &cobra.Command{
 			}
 
 			embedCfg := vector.EmbedConfig{
-				Provider:    cfg.EmbedProvider,
-				GeminiKey:   cfg.GeminiAPIKey,
-				OllamaURL:   cfg.OllamaURL,
-				OllamaModel: cfg.OllamaEmbedModel,
+				Provider:      cfg.EmbedProvider,
+				GeminiKey:     cfg.GeminiAPIKey,
+				OllamaURL:     cfg.OllamaURL,
+				OllamaModel:   cfg.OllamaEmbedModel,
+				OpenAIBaseURL: cfg.OpenAIBaseURL,
+				OpenAIAPIKey:  cfg.OpenAIAPIKey,
+				OpenAIModel:   cfg.OpenAIEmbedModel,
 			}
 			embedder, err := vector.NewEmbedder(ctx, embedCfg)
 			if err != nil {

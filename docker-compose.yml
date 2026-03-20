@@ -13,6 +13,10 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://localhost:8001/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-3.5-turbo}
+      OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-ada-002}
     depends_on:
       postgres:
         condition: service_healthy

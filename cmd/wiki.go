@@ -49,10 +49,14 @@ var wikiCmd = &cobra.Command{
 
 		// Create agent
 		provCfg := agent.ProviderConfig{
-			Provider:    cfg.LLMProvider,
-			GeminiKey:   cfg.GeminiAPIKey,
-			OllamaURL:   cfg.OllamaURL,
-			OllamaModel: cfg.OllamaModel,
+			Provider:      cfg.LLMProvider,
+			GeminiKey:     cfg.GeminiAPIKey,
+			OllamaURL:     cfg.OllamaURL,
+			OllamaModel:   cfg.OllamaModel,
+			OpenAIBaseURL: cfg.OpenAIBaseURL,
+			OpenAIAPIKey:  cfg.OpenAIAPIKey,
+			OpenAIModel:   cfg.OpenAIModel,
+			OpenAIDisableThinking: cfg.OpenAIDisableThinking,
 		}
 		a, err := agent.NewAgent(ctx, agent.DefaultConfig(), provCfg, nil, "")
 		if err != nil {

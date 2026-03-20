@@ -23,6 +23,10 @@ var goatlasEnvKeys = []string{
 	"OLLAMA_URL",
 	"OLLAMA_MODEL",
 	"OLLAMA_EMBED_MODEL",
+	"OPENAI_BASE_URL",
+	"OPENAI_API_KEY",
+	"OPENAI_MODEL",
+	"OPENAI_EMBED_MODEL",
 }
 
 // hooksCmd is the parent for "goatlas hooks install|uninstall".

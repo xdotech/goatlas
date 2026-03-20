@@ -18,14 +18,20 @@ type Config struct {
 	HTTPAddr     string
 	RRFK         int // RRF constant k (default 60)
 
-	// LLM provider: "gemini" (default) | "ollama"
+	// LLM provider: "gemini" (default) | "ollama" | "openai"
 	LLMProvider string
-	// Embedding provider: "gemini" (default) | "ollama"
+	// Embedding provider: "gemini" (default) | "ollama" | "openai"
 	EmbedProvider string
 	// Ollama settings (used when provider is "ollama")
 	OllamaURL        string
 	OllamaModel      string // chat model, e.g. "llama3.2"
 	OllamaEmbedModel string // embedding model, e.g. "nomic-embed-text"
+	// OpenAI-compatible settings (used when provider is "openai")
+	OpenAIBaseURL    string // e.g. "http://10.1.1.246:8001/v1"
+	OpenAIAPIKey     string // API key (use "ignored" for servers that don't require auth)
+	OpenAIModel      string // chat model, e.g. "qwen3.5-35b"
+	OpenAIEmbedModel string // embedding model, e.g. "text-embedding-ada-002"
+	OpenAIDisableThinking bool // disable reasoning/thinking mode (e.g. Qwen3)
 }
 
 // Load reads configuration from environment variables and optional .env file.
@@ -47,6 +53,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("OLLAMA_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_MODEL", "llama3.2")
 	viper.SetDefault("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+	viper.SetDefault("OPENAI_BASE_URL", "http://localhost:8001/v1")
+	viper.SetDefault("OPENAI_API_KEY", "")
+	viper.SetDefault("OPENAI_MODEL", "gpt-3.5-turbo")
+	viper.SetDefault("OPENAI_EMBED_MODEL", "text-embedding-ada-002")
+	viper.SetDefault("OPENAI_DISABLE_THINKING", false)
 
 	_ = viper.ReadInConfig() // ignore missing .env file
 
@@ -70,5 +81,10 @@ func Load() (*Config, error) {
 		OllamaURL:        viper.GetString("OLLAMA_URL"),
 		OllamaModel:      viper.GetString("OLLAMA_MODEL"),
 		OllamaEmbedModel: viper.GetString("OLLAMA_EMBED_MODEL"),
+		OpenAIBaseURL:    viper.GetString("OPENAI_BASE_URL"),
+		OpenAIAPIKey:     viper.GetString("OPENAI_API_KEY"),
+		OpenAIModel:      viper.GetString("OPENAI_MODEL"),
+		OpenAIEmbedModel: viper.GetString("OPENAI_EMBED_MODEL"),
+		OpenAIDisableThinking: viper.GetBool("OPENAI_DISABLE_THINKING"),
 	}, nil
 }

@@ -23,8 +23,8 @@ var embedCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
-		if cfg.EmbedProvider != "ollama" && cfg.GeminiAPIKey == "" {
-			return fmt.Errorf("GEMINI_API_KEY not set (or set EMBED_PROVIDER=ollama)")
+		if cfg.EmbedProvider != "ollama" && cfg.EmbedProvider != "openai" && cfg.GeminiAPIKey == "" {
+			return fmt.Errorf("GEMINI_API_KEY not set (or set EMBED_PROVIDER=ollama|openai)")
 		}
 
 		pool, err := db.NewPool(ctx, cfg.DatabaseDSN)
@@ -49,10 +49,13 @@ var embedCmd = &cobra.Command{
 		}
 
 		embedCfg := vector.EmbedConfig{
-			Provider:    cfg.EmbedProvider,
-			GeminiKey:   cfg.GeminiAPIKey,
-			OllamaURL:   cfg.OllamaURL,
-			OllamaModel: cfg.OllamaEmbedModel,
+			Provider:      cfg.EmbedProvider,
+			GeminiKey:     cfg.GeminiAPIKey,
+			OllamaURL:     cfg.OllamaURL,
+			OllamaModel:   cfg.OllamaEmbedModel,
+			OpenAIBaseURL: cfg.OpenAIBaseURL,
+			OpenAIAPIKey:  cfg.OpenAIAPIKey,
+			OpenAIModel:   cfg.OpenAIEmbedModel,
 		}
 		embedder, err := vector.NewEmbedder(ctx, embedCfg)
 		if err != nil {

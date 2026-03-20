@@ -16,7 +16,7 @@
 - **Knowledge Graph** — Neo4j graph of packages, files, functions, types with import/call/implementation edges
 - **Hybrid BM25 + Semantic Search** — Reciprocal Rank Fusion merges keyword and vector results; semantic search via Gemini or Ollama embeddings
 - **Process & Community Detection** — BFS from entry points traces execution flows; Louvain clustering groups code communities
-- **Pluggable LLM** — Supports Gemini (`gemini-2.0-flash`) and Ollama (any local model) for both embeddings and agentic Q&A
+- **Pluggable LLM** — Supports Gemini (`gemini-2.0-flash`), Ollama (any local model), and any OpenAI-compatible API (vLLM, LiteLLM, etc.) for both embeddings and agentic Q&A
 - **MCP Server** — 22 tools, 5 resources, 3 prompts via stdio for Cursor, Claude Desktop, and any MCP client
 - **Claude Code Hooks** — SessionStart/PreToolUse/PostToolUse integration for session context injection, semantic enrichment, and incremental re-indexing
 - **AI-Generated Docs** — SKILL.md per community cluster and full Markdown wiki from the knowledge graph
@@ -146,6 +146,11 @@ To use Ollama instead of Gemini:
 LLM_PROVIDER=ollama EMBED_PROVIDER=ollama make docker-up
 ```
 
+To use an OpenAI-compatible API (vLLM, LiteLLM, etc.):
+```bash
+OPENAI_BASE_URL=http://10.1.1.246:8001/v1 OPENAI_MODEL=qwen3.5-35b OPENAI_API_KEY=ignored LLM_PROVIDER=openai make docker-up
+```
+
 **3. Index your repo**
 ```bash
 docker compose exec goatlas ./goatlas index /path/to/your/repo
@@ -251,16 +256,20 @@ Add the following config to the appropriate file for your client:
 
 ## LLM Providers
 
-GoAtlas supports **Gemini** (default) and **Ollama** (local) for both chat and embeddings, configured independently.
+GoAtlas supports **Gemini** (default), **Ollama** (local), and any **OpenAI-compatible API** (vLLM, LiteLLM, text-generation-inference, LocalAI, etc.) for both chat and embeddings, configured independently.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `gemini` | Chat/agent provider: `gemini` \| `ollama` |
-| `EMBED_PROVIDER` | `gemini` | Embedding provider: `gemini` \| `ollama` |
+| `LLM_PROVIDER` | `gemini` | Chat/agent provider: `gemini` \| `ollama` \| `openai` |
+| `EMBED_PROVIDER` | `gemini` | Embedding provider: `gemini` \| `ollama` \| `openai` |
 | `GEMINI_API_KEY` | — | Required when using Gemini |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama chat model |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model |
+| `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible API base URL |
+| `OPENAI_API_KEY` | — | API key (use `ignored` for servers that don't need auth) |
+| `OPENAI_MODEL` | `gpt-3.5-turbo` | OpenAI-compatible chat model |
+| `OPENAI_EMBED_MODEL` | `text-embedding-ada-002` | OpenAI-compatible embedding model |
 
 **Ollama example** — run entirely locally:
 ```env
@@ -269,6 +278,14 @@ EMBED_PROVIDER=ollama
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 OLLAMA_EMBED_MODEL=nomic-embed-text
+```
+
+**OpenAI-compatible example** — connect to vLLM, LiteLLM, or any OpenAI-compatible server:
+```env
+LLM_PROVIDER=openai
+OPENAI_BASE_URL=http://10.1.1.246:8001/v1
+OPENAI_API_KEY=ignored
+OPENAI_MODEL=qwen3.5-35b
 ```
 
 > **Note:** Switching embedding models requires re-running `go run . embed --force` since vector dimensions differ (Gemini `text-embedding-004` = 768 dims, `nomic-embed-text` = 768 dims, `mxbai-embed-large` = 1024 dims).
@@ -349,11 +366,15 @@ goatlas migrate                   # run database migrations
 | `NEO4J_USER` | `neo4j` | Neo4j username |
 | `NEO4J_PASS` | `goatlas_neo4j` | Neo4j password |
 | `GEMINI_API_KEY` | — | Google Gemini API key |
-| `LLM_PROVIDER` | `gemini` | LLM backend: `gemini` \| `ollama` |
-| `EMBED_PROVIDER` | `gemini` | Embedding backend: `gemini` \| `ollama` |
+| `LLM_PROVIDER` | `gemini` | LLM backend: `gemini` \| `ollama` \| `openai` |
+| `EMBED_PROVIDER` | `gemini` | Embedding backend: `gemini` \| `ollama` \| `openai` |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama chat model |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model |
+| `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible API base URL |
+| `OPENAI_API_KEY` | — | API key (use `ignored` if not needed) |
+| `OPENAI_MODEL` | `gpt-3.5-turbo` | OpenAI-compatible chat model |
+| `OPENAI_EMBED_MODEL` | `text-embedding-ada-002` | OpenAI-compatible embedding model |
 | `REPO_PATH` | cwd | Default repository path |
 
 ## Development

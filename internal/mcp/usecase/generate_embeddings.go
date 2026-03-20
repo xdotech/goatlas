@@ -22,8 +22,8 @@ func NewGenerateEmbeddingsUseCase(pool *pgxpool.Pool, qdrantURL string, embedCfg
 
 // Execute generates embeddings for all indexed symbols.
 func (uc *GenerateEmbeddingsUseCase) Execute(ctx context.Context, force bool) (string, error) {
-	if uc.embedCfg.Provider != "ollama" && uc.embedCfg.GeminiKey == "" {
-		return "", fmt.Errorf("GEMINI_API_KEY not configured — cannot generate embeddings")
+	if uc.embedCfg.Provider != "ollama" && uc.embedCfg.Provider != "openai" && uc.embedCfg.GeminiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY not configured — cannot generate embeddings (or set EMBED_PROVIDER=ollama|openai)")
 	}
 
 	// Select vector store: Qdrant if configured, otherwise pgvector (default).
