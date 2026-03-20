@@ -350,7 +350,7 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 	}
 	defer rows.Close()
 
-	var batch []map[string]any
+	var qualifiedBatch, nameBatch []map[string]any
 	for rows.Next() {
 		var callerQName, calleeName string
 		var calleeQualified *string
@@ -363,27 +363,47 @@ func (b *Builder) buildCallEdges(ctx context.Context, result *BuildResult) error
 		if calleeQualified != nil {
 			cq = *calleeQualified
 		}
-		batch = append(batch, map[string]any{
+		row := map[string]any{
 			"caller": callerQName, "callee_qualified": cq,
 			"callee_name": calleeName, "line": line, "conf": confidence,
-		})
+		}
+		if cq != "" {
+			qualifiedBatch = append(qualifiedBatch, row)
+		} else {
+			nameBatch = append(nameBatch, row)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 
-	result.CallEdges = len(batch)
-	if len(batch) == 0 {
+	result.CallEdges = len(qualifiedBatch) + len(nameBatch)
+	if result.CallEdges == 0 {
 		return nil
 	}
 
-	return runBatch(ctx, b.client, `
-		UNWIND $rows AS row
-		MATCH (caller:Function {qualified: row.caller})
-		MATCH (callee:Function)
-		WHERE callee.qualified = row.callee_qualified OR callee.name = row.callee_name
-		MERGE (caller)-[:CALLS {line: row.line, confidence: row.conf}]->(callee)
-	`, batch)
+	if len(qualifiedBatch) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (caller:Function {qualified: row.caller})
+			MATCH (callee:Function {qualified: row.callee_qualified})
+			MERGE (caller)-[:CALLS {line: row.line, confidence: row.conf}]->(callee)
+		`, qualifiedBatch); err != nil {
+			return err
+		}
+	}
+	if len(nameBatch) > 0 {
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (caller:Function {qualified: row.caller})
+			MATCH (callee:Function {name: row.callee_name})
+			MERGE (caller)-[:CALLS {line: row.line, confidence: row.conf}]->(callee)
+		`, nameBatch); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) error {
@@ -420,8 +440,15 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 	if len(inputs) > 0 {
 		if err := runBatch(ctx, b.client, `
 			UNWIND $rows AS row
-			MATCH (fn:Function)
-			WHERE fn.qualified = row.symbol OR fn.name = row.symbol
+			MATCH (fn:Function {qualified: row.symbol})
+			MERGE (t:Type {name: row.type_name})
+			MERGE (fn)-[:ACCEPTS {pos: row.pos}]->(t)
+		`, inputs); err != nil {
+			return err
+		}
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (fn:Function {name: row.symbol})
 			MERGE (t:Type {name: row.type_name})
 			MERGE (fn)-[:ACCEPTS {pos: row.pos}]->(t)
 		`, inputs); err != nil {
@@ -431,8 +458,15 @@ func (b *Builder) buildTypeFlowEdges(ctx context.Context, result *BuildResult) e
 	if len(outputs) > 0 {
 		if err := runBatch(ctx, b.client, `
 			UNWIND $rows AS row
-			MATCH (fn:Function)
-			WHERE fn.qualified = row.symbol OR fn.name = row.symbol
+			MATCH (fn:Function {qualified: row.symbol})
+			MERGE (t:Type {name: row.type_name})
+			MERGE (fn)-[:RETURNS {pos: row.pos}]->(t)
+		`, outputs); err != nil {
+			return err
+		}
+		if err := runBatch(ctx, b.client, `
+			UNWIND $rows AS row
+			MATCH (fn:Function {name: row.symbol})
 			MERGE (t:Type {name: row.type_name})
 			MERGE (fn)-[:RETURNS {pos: row.pos}]->(t)
 		`, outputs); err != nil {
@@ -475,8 +509,8 @@ func (b *Builder) buildImplementsEdges(ctx context.Context, result *BuildResult)
 
 	return runBatch(ctx, b.client, `
 		UNWIND $rows AS row
-		MATCH (fn:Function)
-		WHERE fn.qualified CONTAINS row.struct_name AND fn.name = row.method
+		MATCH (fn:Function {name: row.method})
+		WHERE fn.qualified CONTAINS row.struct_name
 		MERGE (iface:Type {name: row.iface_name})
 		MERGE (fn)-[:IMPLEMENTS {method: row.method, confidence: row.conf}]->(iface)
 	`, batch)
