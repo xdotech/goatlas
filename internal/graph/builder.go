@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -104,20 +105,53 @@ func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	return result, nil
 }
 
-func (b *Builder) createIndexes(ctx context.Context) error {
-	indexes := []string{
-		`CREATE INDEX package_name IF NOT EXISTS FOR (p:Package) ON (p.name)`,
-		`CREATE INDEX file_path IF NOT EXISTS FOR (f:File) ON (f.path)`,
-		`CREATE INDEX function_qualified IF NOT EXISTS FOR (fn:Function) ON (fn.qualified)`,
-		`CREATE INDEX function_name IF NOT EXISTS FOR (fn:Function) ON (fn.name)`,
-		`CREATE INDEX type_qualified IF NOT EXISTS FOR (t:Type) ON (t.qualified)`,
-		`CREATE INDEX type_name IF NOT EXISTS FOR (t:Type) ON (t.name)`,
-		`CREATE INDEX service_name IF NOT EXISTS FOR (s:Service) ON (s.name)`,
-		`CREATE INDEX topic_name IF NOT EXISTS FOR (tp:Topic) ON (tp.name)`,
-		`CREATE INDEX endpoint_path IF NOT EXISTS FOR (ep:Endpoint) ON (ep.path)`,
+func (b *Builder) getNeo4jMajorVersion(ctx context.Context) int {
+	records, err := b.client.QueryNodes(ctx, "CALL dbms.components() YIELD versions RETURN versions[0] AS version", nil)
+	if err == nil && len(records) > 0 {
+		if v, ok := records[0]["version"].(string); ok && len(v) > 0 {
+			if strings.HasPrefix(v, "4.") {
+				return 4
+			}
+		}
 	}
+	// Default to 5+
+	return 5
+}
+
+func (b *Builder) createIndexes(ctx context.Context) error {
+	majorVersion := b.getNeo4jMajorVersion(ctx)
+	var indexes []string
+
+	if majorVersion >= 5 {
+		// Native Neo4j 5 syntax
+		indexes = []string{
+			`CREATE INDEX package_name IF NOT EXISTS FOR (p:Package) ON (p.name)`,
+			`CREATE INDEX file_path IF NOT EXISTS FOR (f:File) ON (f.path)`,
+			`CREATE INDEX function_qualified IF NOT EXISTS FOR (fn:Function) ON (fn.qualified)`,
+			`CREATE INDEX function_name IF NOT EXISTS FOR (fn:Function) ON (fn.name)`,
+			`CREATE INDEX type_qualified IF NOT EXISTS FOR (t:Type) ON (t.qualified)`,
+			`CREATE INDEX type_name IF NOT EXISTS FOR (t:Type) ON (t.name)`,
+			`CREATE INDEX service_name IF NOT EXISTS FOR (s:Service) ON (s.name)`,
+			`CREATE INDEX topic_name IF NOT EXISTS FOR (tp:Topic) ON (tp.name)`,
+			`CREATE INDEX endpoint_path IF NOT EXISTS FOR (ep:Endpoint) ON (ep.path)`,
+		}
+	} else {
+		// Legacy Neo4j 4 syntax
+		indexes = []string{
+			`CREATE INDEX IF NOT EXISTS package_name FOR (p:Package) ON (p.name)`,
+			`CREATE INDEX IF NOT EXISTS file_path FOR (f:File) ON (f.path)`,
+			`CREATE INDEX IF NOT EXISTS function_qualified FOR (fn:Function) ON (fn.qualified)`,
+			`CREATE INDEX IF NOT EXISTS function_name FOR (fn:Function) ON (fn.name)`,
+			`CREATE INDEX IF NOT EXISTS type_qualified FOR (t:Type) ON (t.qualified)`,
+			`CREATE INDEX IF NOT EXISTS type_name FOR (t:Type) ON (t.name)`,
+			`CREATE INDEX IF NOT EXISTS service_name FOR (s:Service) ON (s.name)`,
+			`CREATE INDEX IF NOT EXISTS topic_name FOR (tp:Topic) ON (tp.name)`,
+			`CREATE INDEX IF NOT EXISTS endpoint_path FOR (ep:Endpoint) ON (ep.path)`,
+		}
+	}
+
 	for _, idx := range indexes {
-		// Non-fatal: older Neo4j versions may use different syntax.
+		// Non-fatal: older Neo4j versions may use different syntax or already have it.
 		err := b.client.RunCypher(ctx, idx, nil)
 		if err != nil {
 			log.Printf("Failed to create index: %s. Error: %v", idx, err)
