@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
+	"regexp"
 	"strings"
 
 	"github.com/xdotech/goatlas/internal/indexer/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// receiverRe extracts the type name from qualified names like handler.(*UserHandler).Create
+var receiverRe = regexp.MustCompile(`\(\*?([A-Z][a-zA-Z0-9]+)\)`)
 
 // CommunityDetector implements Louvain community detection on the call graph.
 type CommunityDetector struct {
@@ -53,12 +56,13 @@ func (d *CommunityDetector) DetectAll(ctx context.Context, repoID int64) (int, e
 	}
 
 	count := 0
+	usedNames := map[string]int{}
 	for commID, members := range groups {
 		if len(members) < 2 {
 			continue // skip singleton communities
 		}
 
-		name := deriveCommunityName(members)
+		name := deriveCommunityName(members, commID, usedNames)
 		comm := &domain.Community{
 			RepoID:      repoID,
 			CommunityID: commID,
@@ -285,41 +289,54 @@ func modularity(n int, edges []Edge, community []int) float64 {
 var _ = modularity
 var _ = math.Abs
 
-// deriveCommunityName generates a name for a community based on its members.
-func deriveCommunityName(members []string) string {
-	// Find most common package prefix
+// deriveCommunityName generates a unique, descriptive name for a community.
+// It combines the dominant package prefix with the dominant receiver type (if any).
+// existingNames tracks already-used names to ensure uniqueness via counter suffixes.
+func deriveCommunityName(members []string, communityID int, existingNames map[string]int) string {
 	pkgCounts := map[string]int{}
+	receiverCounts := map[string]int{}
+
 	for _, m := range members {
 		parts := strings.Split(m, ".")
 		if len(parts) >= 2 {
-			pkg := parts[0]
-			// For qualified names like "handler.(*UserHandler).Create", extract "handler"
-			pkg = strings.TrimPrefix(pkg, "(")
-			pkg = strings.TrimPrefix(pkg, "*")
+			pkg := strings.TrimPrefix(strings.TrimPrefix(parts[0], "("), "*")
 			pkgCounts[pkg]++
+		}
+		// Extract receiver from pattern like (*UserHandler) or (OrderService)
+		if matches := receiverRe.FindStringSubmatch(m); len(matches) >= 2 {
+			receiverCounts[matches[1]]++
 		}
 	}
 
-	if len(pkgCounts) == 0 {
-		return fmt.Sprintf("cluster-%d", len(members))
+	topPkg := topMapKey(pkgCounts)
+	topReceiver := topMapKey(receiverCounts)
+
+	var baseName string
+	if topReceiver != "" && topReceiver != topPkg {
+		baseName = fmt.Sprintf("%s/%s", topPkg, topReceiver)
+	} else if topPkg != "" {
+		baseName = topPkg
+	} else {
+		baseName = fmt.Sprintf("cluster-%d", communityID)
 	}
 
-	// Sort by count descending
-	type pkgCount struct {
-		pkg   string
-		count int
+	// Ensure uniqueness by appending a counter when name is already taken
+	existingNames[baseName]++
+	if existingNames[baseName] > 1 {
+		return fmt.Sprintf("%s-%d", baseName, existingNames[baseName])
 	}
-	var sorted []pkgCount
-	for pkg, count := range pkgCounts {
-		sorted = append(sorted, pkgCount{pkg, count})
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].count > sorted[j].count
-	})
+	return baseName
+}
 
-	top := sorted[0].pkg
-	if len(sorted) > 1 {
-		return fmt.Sprintf("%s (+%d packages)", top, len(sorted)-1)
+// topMapKey returns the key with the highest count, or "" if map is empty.
+func topMapKey(counts map[string]int) string {
+	best := ""
+	bestCount := 0
+	for k, v := range counts {
+		if v > bestCount || (v == bestCount && k < best) {
+			best = k
+			bestCount = v
+		}
 	}
-	return top
+	return best
 }
