@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -42,17 +43,23 @@ var hooksInstallCmd = &cobra.Command{
 			}
 		}
 
+		// Resolve absolute path of this binary so hooks work regardless of PATH.
+		binaryPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve executable path: %w", err)
+		}
+
 		// Build hook entries
 		preHook := map[string]any{
 			"matcher": "Grep|Glob",
 			"hooks": []map[string]any{
-				{"type": "command", "command": "goatlas hook pre"},
+				{"type": "command", "command": binaryPath + " hook pre"},
 			},
 		}
 		postHook := map[string]any{
-			"matcher": "Write|Edit",
+			"matcher": "Write|Edit|MultiEdit",
 			"hooks": []map[string]any{
-				{"type": "command", "command": "goatlas hook post"},
+				{"type": "command", "command": binaryPath + " hook post"},
 			},
 		}
 
@@ -63,8 +70,8 @@ var hooksInstallCmd = &cobra.Command{
 		}
 
 		// Set PreToolUse — replace any existing GoAtlas entries
-		hooks["PreToolUse"] = mergeHookEntries(hooks["PreToolUse"], preHook, "goatlas hook pre")
-		hooks["PostToolUse"] = mergeHookEntries(hooks["PostToolUse"], postHook, "goatlas hook post")
+		hooks["PreToolUse"] = mergeHookEntries(hooks["PreToolUse"], preHook, "hook pre")
+		hooks["PostToolUse"] = mergeHookEntries(hooks["PostToolUse"], postHook, "hook post")
 
 		settings["hooks"] = hooks
 
@@ -78,8 +85,8 @@ var hooksInstallCmd = &cobra.Command{
 		}
 
 		fmt.Printf("✅ GoAtlas Claude Code hooks installed in %s\n", settingsFile)
-		fmt.Println("   PreToolUse:  Grep|Glob → goatlas hook pre")
-		fmt.Println("   PostToolUse: Write|Edit → goatlas hook post")
+		fmt.Printf("   PreToolUse:  Grep|Glob          → %s hook pre\n", binaryPath)
+		fmt.Printf("   PostToolUse: Write|Edit|MultiEdit → %s hook post\n", binaryPath)
 		return nil
 	},
 }
@@ -113,8 +120,8 @@ var hooksUninstallCmd = &cobra.Command{
 		}
 
 		// Remove GoAtlas entries from PreToolUse and PostToolUse
-		hooks["PreToolUse"] = removeGoatlasEntries(hooks["PreToolUse"])
-		hooks["PostToolUse"] = removeGoatlasEntries(hooks["PostToolUse"])
+		hooks["PreToolUse"] = removeGoatlasEntries(hooks["PreToolUse"], "goatlas hook")
+		hooks["PostToolUse"] = removeGoatlasEntries(hooks["PostToolUse"], "goatlas hook")
 		settings["hooks"] = hooks
 
 		out, _ := json.MarshalIndent(settings, "", "  ")
@@ -128,14 +135,15 @@ var hooksUninstallCmd = &cobra.Command{
 }
 
 // mergeHookEntries adds a GoAtlas hook entry to existing entries, replacing any previous GoAtlas entry.
-func mergeHookEntries(existing any, newEntry map[string]any, goatlasCmd string) []any {
+// cmdSubstr is a substring matched against hook commands to identify existing GoAtlas entries.
+func mergeHookEntries(existing any, newEntry map[string]any, cmdSubstr string) []any {
 	var entries []any
 
 	// Keep non-GoAtlas entries
 	if arr, ok := existing.([]any); ok {
 		for _, item := range arr {
 			if m, ok := item.(map[string]any); ok {
-				if !containsGoatlasHook(m, goatlasCmd) {
+				if !containsGoatlasHook(m, cmdSubstr) {
 					entries = append(entries, m)
 				}
 			}
@@ -148,12 +156,12 @@ func mergeHookEntries(existing any, newEntry map[string]any, goatlasCmd string) 
 }
 
 // removeGoatlasEntries removes all entries containing GoAtlas hook commands.
-func removeGoatlasEntries(existing any) []any {
+func removeGoatlasEntries(existing any, cmdSubstr string) []any {
 	var entries []any
 	if arr, ok := existing.([]any); ok {
 		for _, item := range arr {
 			if m, ok := item.(map[string]any); ok {
-				if !containsGoatlasHook(m, "goatlas hook") {
+				if !containsGoatlasHook(m, cmdSubstr) {
 					entries = append(entries, m)
 				}
 			}
@@ -165,13 +173,13 @@ func removeGoatlasEntries(existing any) []any {
 	return entries
 }
 
-// containsGoatlasHook checks if a hook entry contains a GoAtlas command.
-func containsGoatlasHook(entry map[string]any, cmdPrefix string) bool {
+// containsGoatlasHook checks if a hook entry contains a command with the given substring.
+func containsGoatlasHook(entry map[string]any, cmdSubstr string) bool {
 	if hooks, ok := entry["hooks"].([]any); ok {
 		for _, h := range hooks {
 			if hm, ok := h.(map[string]any); ok {
 				if cmd, ok := hm["command"].(string); ok {
-					if len(cmd) >= len(cmdPrefix) && cmd[:len(cmdPrefix)] == cmdPrefix {
+					if strings.Contains(cmd, cmdSubstr) {
 						return true
 					}
 				}

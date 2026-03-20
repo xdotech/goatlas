@@ -86,7 +86,8 @@ var hookPostCmd = &cobra.Command{
 		}
 
 		toolName := strings.ToLower(payload.ToolName)
-		if toolName != "write" && toolName != "edit" && toolName != "write_to_file" && toolName != "replace_file_content" && toolName != "multi_replace_file_content" {
+		if toolName != "write" && toolName != "edit" && toolName != "multiedit" &&
+			toolName != "write_to_file" && toolName != "replace_file_content" && toolName != "multi_replace_file_content" {
 			return nil
 		}
 
