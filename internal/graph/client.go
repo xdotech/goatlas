@@ -34,14 +34,14 @@ func (c *Client) Close(ctx context.Context) error {
 func (c *Client) RunCypher(ctx context.Context, query string, params map[string]any) error {
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
-	_, err := neo4j.ExecuteWrite(ctx, session, func(tx neo4j.ManagedTransaction) (any, error) {
+	_, err := neo4j.ExecuteWrite(ctx, session, func(tx neo4j.ManagedTransaction) (struct{}, error) {
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
-			return nil, err
+			return struct{}{}, err
 		}
 		// Consume result to allow the transaction to complete.
 		_, err = result.Consume(ctx)
-		return nil, err
+		return struct{}{}, err
 	})
 	return err
 }

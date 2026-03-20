@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -34,7 +35,11 @@ type BuildResult struct {
 }
 
 // batchSize controls how many rows are sent per UNWIND transaction.
-const batchSize = 500
+// Kept small to avoid CPU spikes on the Neo4j container.
+const batchSize = 100
+
+// batchDelay is the pause between batches to let Neo4j breathe.
+const batchDelay = 50 * time.Millisecond
 
 // runBatch executes cypher with UNWIND $rows in chunks to avoid large transactions.
 func runBatch(ctx context.Context, client *Client, cypher string, rows []map[string]any) error {
@@ -45,6 +50,9 @@ func runBatch(ctx context.Context, client *Client, cypher string, rows []map[str
 		}
 		if err := client.RunCypher(ctx, cypher, map[string]any{"rows": rows[i:end]}); err != nil {
 			return err
+		}
+		if end < len(rows) {
+			time.Sleep(batchDelay)
 		}
 	}
 	return nil
