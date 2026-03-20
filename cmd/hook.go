@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/xdotech/goatlas/internal/config"
+	"github.com/xdotech/goatlas/internal/db"
+	"github.com/xdotech/goatlas/internal/indexer"
+	mcpusecase "github.com/xdotech/goatlas/internal/mcp/usecase"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +25,14 @@ var hookCmd = &cobra.Command{
 	Long:  `These subcommands are called by Claude Code hooks. They read tool input/output from stdin and write enrichment to stdout.`,
 }
 
+// hookPreOutput is the JSON structure Claude Code expects for additionalContext injection.
+type hookPreOutput struct {
+	HookSpecificOutput struct {
+		HookEventName     string `json:"hookEventName"`
+		AdditionalContext string `json:"additionalContext"`
+	} `json:"hookSpecificOutput"`
+}
+
 // hookPreCmd handles PreToolUse: when Claude calls Grep/Glob, enrich with semantic context.
 var hookPreCmd = &cobra.Command{
 	Use:   "pre",
@@ -26,22 +40,19 @@ var hookPreCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
+			return nil // fail silently, don't block Claude
 		}
 
-		// Claude Code sends JSON with tool_name and tool_input
 		var payload struct {
 			ToolName  string         `json:"tool_name"`
 			ToolInput map[string]any `json:"tool_input"`
 		}
 		if err := json.Unmarshal(data, &payload); err != nil {
-			// Not valid JSON, skip silently
 			return nil
 		}
 
 		toolName := strings.ToLower(payload.ToolName)
 		if toolName != "grep" && toolName != "glob" {
-			// Not a tool we enrich
 			return nil
 		}
 
@@ -56,15 +67,45 @@ var hookPreCmd = &cobra.Command{
 			return nil
 		}
 
-		// Call goatlas search_code via MCP or direct — for simplicity,
-		// we output a hint that the AI can use
-		fmt.Fprintf(os.Stdout, "\n--- GoAtlas Semantic Context ---\n")
-		fmt.Fprintf(os.Stdout, "Search pattern: %s\n", pattern)
-		fmt.Fprintf(os.Stdout, "Tip: Use `search_code` MCP tool with query=%q mode=semantic for deeper results.\n", pattern)
-		fmt.Fprintf(os.Stdout, "--- End GoAtlas Context ---\n")
+		// Use a short timeout so we never block Claude
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
 
-		return nil
+		context_ := searchSymbols(ctx, pattern)
+		if context_ == "" {
+			return nil
+		}
+
+		out := hookPreOutput{}
+		out.HookSpecificOutput.HookEventName = "PreToolUse"
+		out.HookSpecificOutput.AdditionalContext = context_
+
+		return json.NewEncoder(os.Stdout).Encode(out)
 	},
+}
+
+// searchSymbols queries GoAtlas DB for symbols matching pattern and returns formatted context.
+func searchSymbols(ctx context.Context, pattern string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+
+	pool, err := db.NewPool(ctx, cfg.DatabaseDSN)
+	if err != nil {
+		return ""
+	}
+	defer pool.Close()
+
+	indexerSvc := indexer.NewService(pool)
+	uc := mcpusecase.NewFindSymbolUseCase(indexerSvc.SymbolRepo, cfg.RepoPath)
+
+	result, err := uc.Execute(ctx, pattern, "")
+	if err != nil || result == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("GoAtlas semantic context for %q:\n%s", pattern, result)
 }
 
 // hookPostCmd handles PostToolUse: when Claude writes/edits a file, trigger incremental re-index.

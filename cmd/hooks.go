@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,20 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+// goatlasEnvKeys are the env vars GoAtlas needs, synced to ~/.claude/settings.json on install.
+var goatlasEnvKeys = []string{
+	"DATABASE_DSN",
+	"NEO4J_URL",
+	"NEO4J_USER",
+	"NEO4J_PASS",
+	"GEMINI_API_KEY",
+	"LLM_PROVIDER",
+	"EMBED_PROVIDER",
+	"OLLAMA_URL",
+	"OLLAMA_MODEL",
+	"OLLAMA_EMBED_MODEL",
+}
 
 // hooksCmd is the parent for "goatlas hooks install|uninstall".
 var hooksCmd = &cobra.Command{
@@ -75,7 +90,7 @@ var hooksInstallCmd = &cobra.Command{
 
 		settings["hooks"] = hooks
 
-		// Write back
+		// Write back project settings
 		data, err := json.MarshalIndent(settings, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal settings: %w", err)
@@ -85,8 +100,19 @@ var hooksInstallCmd = &cobra.Command{
 		}
 
 		fmt.Printf("✅ GoAtlas Claude Code hooks installed in %s\n", settingsFile)
-		fmt.Printf("   PreToolUse:  Grep|Glob          → %s hook pre\n", binaryPath)
+		fmt.Printf("   PreToolUse:  Grep|Glob           → %s hook pre\n", binaryPath)
 		fmt.Printf("   PostToolUse: Write|Edit|MultiEdit → %s hook post\n", binaryPath)
+
+		// Sync env vars to ~/.claude/settings.json so hooks work in any project
+		if synced, err := syncEnvToClaudeSettings(repoPath); err != nil {
+			fmt.Printf("⚠️  Could not sync env to ~/.claude/settings.json: %v\n", err)
+		} else if len(synced) > 0 {
+			home, _ := os.UserHomeDir()
+			globalSettings := filepath.Join(home, ".claude", "settings.json")
+			fmt.Printf("✅ GoAtlas env vars synced: %s\n", strings.Join(synced, ", "))
+			fmt.Printf("   To change values later, edit the \"env\" section in: %s\n", globalSettings)
+		}
+
 		return nil
 	},
 }
@@ -187,6 +213,142 @@ func containsGoatlasHook(entry map[string]any, cmdSubstr string) bool {
 		}
 	}
 	return false
+}
+
+// promptConfig defines a required config value to prompt for interactively.
+type promptConfig struct {
+	key         string
+	label       string
+	defaultVal  string
+	required    bool
+}
+
+// goatlasPrompts are the values we prompt for when no .env or env vars are present.
+var goatlasPrompts = []promptConfig{
+	{key: "DATABASE_DSN", label: "PostgreSQL DSN", defaultVal: "postgres://goatlas:goatlas@localhost:5432/goatlas", required: true},
+	{key: "GEMINI_API_KEY", label: "Gemini API key (leave blank to use Ollama)", required: false},
+	{key: "NEO4J_URL", label: "Neo4j URL", defaultVal: "bolt://localhost:7687", required: false},
+	{key: "NEO4J_USER", label: "Neo4j user", defaultVal: "neo4j", required: false},
+	{key: "NEO4J_PASS", label: "Neo4j password", defaultVal: "goatlas_neo4j", required: false},
+}
+
+// placeholderValues are values that should be treated as unconfigured.
+var placeholderValues = map[string]bool{
+	"your_gemini_api_key_here": true,
+	"/path/to/your/repo":       true,
+}
+
+// syncEnvToClaudeSettings reads env vars from the repo's .env file (falling back to process env,
+// then interactive prompts) and writes them into ~/.claude/settings.json so GoAtlas hooks work
+// in any project. Returns the list of keys that were synced.
+func syncEnvToClaudeSettings(repoPath string) ([]string, error) {
+	// 1. Collect values: .env file takes priority, then process environment
+	envVals := make(map[string]string)
+	dotEnvPath := filepath.Join(repoPath, ".env")
+	if data, err := os.ReadFile(dotEnvPath); err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			k, v, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			envVals[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	for _, key := range goatlasEnvKeys {
+		if _, ok := envVals[key]; !ok {
+			if v := os.Getenv(key); v != "" {
+				envVals[key] = v
+			}
+		}
+	}
+
+	// 2. Check if required values are missing or placeholder — prompt interactively if so
+	needsPrompt := false
+	for _, p := range goatlasPrompts {
+		v := envVals[p.key]
+		if p.required && (v == "" || placeholderValues[v]) {
+			needsPrompt = true
+			break
+		}
+	}
+
+	if needsPrompt {
+		fmt.Println("\n🔧 GoAtlas configuration — press Enter to accept defaults:")
+		reader := bufio.NewReader(os.Stdin)
+		for _, p := range goatlasPrompts {
+			current := envVals[p.key]
+			if placeholderValues[current] {
+				current = ""
+			}
+
+			// Build prompt label
+			display := p.label
+			if current != "" {
+				display = fmt.Sprintf("%s [%s]", p.label, current)
+			} else if p.defaultVal != "" {
+				display = fmt.Sprintf("%s [%s]", p.label, p.defaultVal)
+			}
+			fmt.Printf("   %s: ", display)
+
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+
+			switch {
+			case input != "":
+				envVals[p.key] = input
+			case current != "":
+				// keep existing
+			case p.defaultVal != "":
+				envVals[p.key] = p.defaultVal
+			}
+		}
+	}
+
+	// 3. Load ~/.claude/settings.json and merge
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
+	globalSettings := filepath.Join(home, ".claude", "settings.json")
+
+	global := make(map[string]any)
+	if data, err := os.ReadFile(globalSettings); err == nil {
+		_ = json.Unmarshal(data, &global)
+	}
+
+	existing, _ := global["env"].(map[string]any)
+	if existing == nil {
+		existing = make(map[string]any)
+	}
+
+	var synced []string
+	for _, key := range goatlasEnvKeys {
+		val := envVals[key]
+		if val == "" || placeholderValues[val] {
+			continue
+		}
+		existing[key] = val
+		synced = append(synced, key)
+	}
+
+	if len(synced) == 0 {
+		return nil, nil
+	}
+
+	global["env"] = existing
+	out, err := json.MarshalIndent(global, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal global settings: %w", err)
+	}
+	if err := os.WriteFile(globalSettings, out, 0o644); err != nil {
+		return nil, fmt.Errorf("write global settings: %w", err)
+	}
+	return synced, nil
 }
 
 func init() {

@@ -120,63 +120,134 @@ graph TB
 
 ## Quick Start
 
-### 1. Install
+Choose the setup path that fits you:
 
+---
+
+### 🐳 Option A — Docker (all-in-one)
+
+Everything runs in containers — no manual DB setup needed.
+
+**1. Clone the repo**
+```bash
+git clone https://github.com/xdotech/goatlas
+cd goatlas
+```
+
+**2. Start all services**
+```bash
+GEMINI_API_KEY=your_key make docker-up
+```
+
+Builds GoAtlas and starts PostgreSQL, Neo4j, and Qdrant. Migrations run automatically on startup.
+
+To use Ollama instead of Gemini:
+```bash
+LLM_PROVIDER=ollama EMBED_PROVIDER=ollama make docker-up
+```
+
+**3. Index your repo**
+```bash
+docker compose exec goatlas ./goatlas index /path/to/your/repo
+```
+
+**4. Ask questions**
+```bash
+docker compose exec goatlas ./goatlas ask "How does the payment service connect to Kafka?"
+```
+
+---
+
+### 💻 Option B — Direct Install
+
+Install the binary and connect to your own PostgreSQL and Neo4j.
+
+**1. Install**
 ```bash
 go install github.com/xdotech/goatlas@latest
 ```
 
-Or build from source:
+**2. Start PostgreSQL and Neo4j**
+
+You can use the provided compose file for just the databases:
 ```bash
-git clone https://github.com/xdotech/goatlas
-cd goatlas && make build
+docker compose up -d postgres neo4j
 ```
 
-### 2. Start Infrastructure
+Or bring your own — just make sure `DATABASE_DSN` and `NEO4J_URL` point to them.
 
+**3. Run migrations**
 ```bash
-make docker-up
-```
-
-Starts PostgreSQL (pgvector), Qdrant (optional), and Neo4j (optional).
-
-### 3. Configure
-
-```bash
-cp .env.example .env
-```
-
-Minimum required:
-```env
-DATABASE_DSN=postgres://goatlas:goatlas@localhost:5432/goatlas
-REPO_PATH=/path/to/your/repo
-
-# Pick a provider (at least one)
-GEMINI_API_KEY=your_key_here   # for Gemini
-# or
-LLM_PROVIDER=ollama            # for local Ollama
-EMBED_PROVIDER=ollama
-```
-
-### 4. Migrate & Index
-
-```bash
+export DATABASE_DSN=postgres://goatlas:goatlas@localhost:5432/goatlas
 goatlas migrate
+```
+
+**4. Index your repo**
+```bash
 goatlas index /path/to/your/repo
 ```
 
-### 5. Start MCP Server
-
+**5. Ask questions**
 ```bash
-goatlas serve
-```
-
-### 6. Ask Questions
-
-```bash
-goatlas ask "How does the payment service connect to Kafka?"
+GEMINI_API_KEY=your_key goatlas ask "How does the payment service connect to Kafka?"
 goatlas chat    # interactive multi-turn session
 ```
+
+---
+
+## Claude Code Integration
+
+The fastest way to get GoAtlas working inside Claude Code — both as hooks and as an MCP server.
+
+### Option A — Claude Code Hooks (recommended)
+
+Hooks automatically enrich every `Grep`/`Glob` search with semantic context and re-index files after edits.
+
+```bash
+# Run once inside your repo
+goatlas hooks install .
+```
+
+The command will:
+1. Install `PreToolUse` / `PostToolUse` hooks in `.claude/settings.json`
+2. Prompt you for `DATABASE_DSN`, `GEMINI_API_KEY`, and Neo4j credentials if not already configured
+3. Save those values to `~/.claude/settings.json` so they work in every project
+
+> **To update credentials later**, edit the `"env"` section in `~/.claude/settings.json`.
+
+### Option B — MCP Server
+
+Connect GoAtlas as a full MCP server to get all 22 tools available in Claude Code, Cursor, or Claude Desktop.
+
+Add the following config to the appropriate file for your client:
+
+| Client | Config file |
+|--------|-------------|
+| Claude Code | `.claude/settings.json` (project) or `~/.claude/settings.json` (global) |
+| Cursor | `~/.cursor/mcp.json` |
+| Claude Desktop | `claude_desktop_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "goatlas": {
+      "command": "/path/to/goatlas",
+      "args": ["serve"],
+      "env": {
+        "DATABASE_DSN": "postgres://goatlas:goatlas@localhost:5432/goatlas",
+        "NEO4J_URL": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASS": "goatlas_neo4j",
+        "GEMINI_API_KEY": "your_gemini_api_key"
+      }
+    }
+  }
+}
+```
+
+> Replace `/path/to/goatlas` with the actual binary path (e.g. `~/go/bin/goatlas`). Run `which goatlas` to find it.
+
+> **Tip:** You can use both hooks and MCP together — hooks handle background enrichment and re-indexing, while MCP gives you direct tool access from the chat interface.
 
 ## LLM Providers
 
@@ -248,31 +319,6 @@ GoAtlas exposes **22 MCP tools** via stdio transport:
 
 **Prompts** — `detect_impact`, `generate_map`, `explain_community`
 
-## Claude Code / Cursor Integration
-
-**Cursor** — `~/.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "goatlas": { "command": "goatlas", "args": ["serve"] }
-  }
-}
-```
-
-**Claude Desktop** — `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "goatlas": { "command": "goatlas", "args": ["serve"] }
-  }
-}
-```
-
-**Claude Code Hooks** — auto-enriches Grep/Glob results and triggers incremental re-indexing on file writes:
-```bash
-goatlas hooks install /path/to/your/repo
-```
-
 ## CLI Reference
 
 ```bash
@@ -316,9 +362,9 @@ goatlas migrate                   # run database migrations
 make build        # compile binary
 make test         # run tests
 make lint         # run linter
-make docker-up    # start infrastructure
-make docker-down  # stop infrastructure
-make migrate      # run migrations
+make docker-up    # build & start all services (migrations run automatically)
+make docker-down  # stop all services
+make migrate      # run migrations manually (local dev without Docker)
 ```
 
 ## License
