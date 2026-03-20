@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -62,52 +63,65 @@ func runBatch(ctx context.Context, client *Client, cypher string, rows []map[str
 func (b *Builder) Build(ctx context.Context) (*BuildResult, error) {
 	result := &BuildResult{}
 
+	log.Println("Starting graph build...")
 	if err := b.createIndexes(ctx); err != nil {
 		return nil, fmt.Errorf("create indexes: %w", err)
 	}
+	log.Println("Indexes created. Building file nodes...")
 	if err := b.buildFileNodes(ctx, result); err != nil {
 		return nil, fmt.Errorf("build file nodes: %w", err)
 	}
+	log.Println("File nodes built. Building symbol nodes...")
 	if err := b.buildSymbolNodes(ctx, result); err != nil {
 		return nil, fmt.Errorf("build symbol nodes: %w", err)
 	}
+	log.Println("Symbol nodes built. Building import edges...")
 	if err := b.buildImportEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build import edges: %w", err)
 	}
+	log.Println("Import edges built. Building service connections...")
 	if err := b.buildServiceConnections(ctx, result); err != nil {
 		return nil, fmt.Errorf("build service connections: %w", err)
 	}
+	log.Println("Service connections built. Building component API edges...")
 	if err := b.buildComponentAPIEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build component API edges: %w", err)
 	}
+	log.Println("Component API edges built. Building call edges...")
 	if err := b.buildCallEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build call edges: %w", err)
 	}
+	log.Println("Call edges built. Building type flow edges...")
 	if err := b.buildTypeFlowEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build type flow edges: %w", err)
 	}
+	log.Println("Type flow edges built. Building implements edges...")
 	if err := b.buildImplementsEdges(ctx, result); err != nil {
 		return nil, fmt.Errorf("build implements edges: %w", err)
 	}
+	log.Println("Implements edges built. Build complete.")
 
 	return result, nil
 }
 
 func (b *Builder) createIndexes(ctx context.Context) error {
 	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS package_name FOR (p:Package) ON (p.name)`,
-		`CREATE INDEX IF NOT EXISTS file_path FOR (f:File) ON (f.path)`,
-		`CREATE INDEX IF NOT EXISTS function_qualified FOR (fn:Function) ON (fn.qualified)`,
-		`CREATE INDEX IF NOT EXISTS function_name FOR (fn:Function) ON (fn.name)`,
-		`CREATE INDEX IF NOT EXISTS type_qualified FOR (t:Type) ON (t.qualified)`,
-		`CREATE INDEX IF NOT EXISTS type_name FOR (t:Type) ON (t.name)`,
-		`CREATE INDEX IF NOT EXISTS service_name FOR (s:Service) ON (s.name)`,
-		`CREATE INDEX IF NOT EXISTS topic_name FOR (tp:Topic) ON (tp.name)`,
-		`CREATE INDEX IF NOT EXISTS endpoint_path FOR (ep:Endpoint) ON (ep.path)`,
+		`CREATE INDEX package_name IF NOT EXISTS FOR (p:Package) ON (p.name)`,
+		`CREATE INDEX file_path IF NOT EXISTS FOR (f:File) ON (f.path)`,
+		`CREATE INDEX function_qualified IF NOT EXISTS FOR (fn:Function) ON (fn.qualified)`,
+		`CREATE INDEX function_name IF NOT EXISTS FOR (fn:Function) ON (fn.name)`,
+		`CREATE INDEX type_qualified IF NOT EXISTS FOR (t:Type) ON (t.qualified)`,
+		`CREATE INDEX type_name IF NOT EXISTS FOR (t:Type) ON (t.name)`,
+		`CREATE INDEX service_name IF NOT EXISTS FOR (s:Service) ON (s.name)`,
+		`CREATE INDEX topic_name IF NOT EXISTS FOR (tp:Topic) ON (tp.name)`,
+		`CREATE INDEX endpoint_path IF NOT EXISTS FOR (ep:Endpoint) ON (ep.path)`,
 	}
 	for _, idx := range indexes {
 		// Non-fatal: older Neo4j versions may use different syntax.
-		_ = b.client.RunCypher(ctx, idx, nil)
+		err := b.client.RunCypher(ctx, idx, nil)
+		if err != nil {
+			log.Printf("Failed to create index: %s. Error: %v", idx, err)
+		}
 	}
 	return nil
 }
