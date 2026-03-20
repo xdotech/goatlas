@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
@@ -69,6 +70,10 @@ func (e *geminiEmbedder) embedChunk(ctx context.Context, texts []string) ([][]fl
 		resp, err := em.BatchEmbedContents(ctx, batch)
 		if err != nil {
 			lastErr = err
+			// Don't retry auth/key errors — they won't recover with retries
+			if isAuthError(err) {
+				return nil, fmt.Errorf("gemini API key invalid or unauthorized: %w", err)
+			}
 			continue
 		}
 		results := make([][]float32, len(resp.Embeddings))
@@ -78,4 +83,16 @@ func (e *geminiEmbedder) embedChunk(ctx context.Context, texts []string) ([][]fl
 		return results, nil
 	}
 	return nil, fmt.Errorf("embed chunk failed after 3 attempts: %w", lastErr)
+}
+
+// isAuthError returns true for API key / authentication failures that should not be retried.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "API_KEY_INVALID") ||
+		strings.Contains(msg, "UNAUTHENTICATED") ||
+		strings.Contains(msg, "401") ||
+		strings.Contains(msg, "403")
 }

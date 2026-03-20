@@ -11,6 +11,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// isGeminiAuthError returns true if the error is a Gemini API auth failure.
+func isGeminiAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "API_KEY_INVALID") ||
+		strings.Contains(msg, "UNAUTHENTICATED") ||
+		strings.Contains(msg, "gemini API key invalid")
+}
+
 const defaultSnippetLines = 12
 const defaultRRFK = 60
 
@@ -89,6 +100,10 @@ func (uc *SearchCodeUseCase) hybridSearch(ctx context.Context, query string, lim
 			return "Search failed: " + err.Error(), nil
 		}
 		partialErr = err
+		// Surface auth errors clearly instead of burying them
+		if isGeminiAuthError(err) {
+			partialErr = fmt.Errorf("⚠️ Semantic search unavailable (GEMINI_API_KEY invalid). Showing keyword results only")
+		}
 	}
 
 	type scoreEntry struct {
