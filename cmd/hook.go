@@ -15,6 +15,7 @@ import (
 	"github.com/xdotech/goatlas/internal/db"
 	"github.com/xdotech/goatlas/internal/indexer"
 	mcpusecase "github.com/xdotech/goatlas/internal/mcp/usecase"
+	"github.com/xdotech/goatlas/internal/mcp/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -184,7 +185,51 @@ func detectRepoRoot(filePath string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// hookSessionCmd handles SessionStart: inject indexed repo context at conversation start.
+var hookSessionCmd = &cobra.Command{
+	Use:   "session",
+	Short: "SessionStart hook: inject indexed repository context",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+
+		cfg, err := config.Load()
+		if err != nil {
+			return nil
+		}
+
+		pool, err := db.NewPool(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			return nil
+		}
+		defer pool.Close()
+
+		reg := registry.NewRepoRegistry(pool)
+		repos, err := reg.List(ctx)
+		if err != nil || len(repos) == 0 {
+			return nil
+		}
+
+		var sb strings.Builder
+		sb.WriteString("GoAtlas indexed repositories:\n")
+		for _, r := range repos {
+			lastIndexed := "never"
+			if r.LastIndexedAt != nil {
+				lastIndexed = r.LastIndexedAt.Format("2006-01-02 15:04")
+			}
+			sb.WriteString(fmt.Sprintf("  - %s (path: %s, last indexed: %s)\n", r.Name, r.Path, lastIndexed))
+		}
+
+		out := hookPreOutput{}
+		out.HookSpecificOutput.HookEventName = "SessionStart"
+		out.HookSpecificOutput.AdditionalContext = sb.String()
+
+		return json.NewEncoder(os.Stdout).Encode(out)
+	},
+}
+
 func init() {
 	hookCmd.AddCommand(hookPreCmd)
 	hookCmd.AddCommand(hookPostCmd)
+	hookCmd.AddCommand(hookSessionCmd)
 }

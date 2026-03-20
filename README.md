@@ -18,7 +18,7 @@
 - **Process & Community Detection** — BFS from entry points traces execution flows; Louvain clustering groups code communities
 - **Pluggable LLM** — Supports Gemini (`gemini-2.0-flash`) and Ollama (any local model) for both embeddings and agentic Q&A
 - **MCP Server** — 22 tools, 5 resources, 3 prompts via stdio for Cursor, Claude Desktop, and any MCP client
-- **Claude Code Hooks** — PreToolUse/PostToolUse integration for semantic enrichment and incremental re-indexing
+- **Claude Code Hooks** — SessionStart/PreToolUse/PostToolUse integration for session context injection, semantic enrichment, and incremental re-indexing
 - **AI-Generated Docs** — SKILL.md per community cluster and full Markdown wiki from the knowledge graph
 
 ## Architecture
@@ -209,7 +209,7 @@ goatlas hooks install .
 ```
 
 The command will:
-1. Install `PreToolUse` / `PostToolUse` hooks in `.claude/settings.json`
+1. Install `SessionStart` / `PreToolUse` / `PostToolUse` hooks in `.claude/settings.json`
 2. Prompt you for `DATABASE_DSN`, `GEMINI_API_KEY`, and Neo4j credentials if not already configured
 3. Save those values to `~/.claude/settings.json` so they work in every project
 

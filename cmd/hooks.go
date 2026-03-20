@@ -65,6 +65,11 @@ var hooksInstallCmd = &cobra.Command{
 		}
 
 		// Build hook entries
+		sessionHook := map[string]any{
+			"hooks": []map[string]any{
+				{"type": "command", "command": binaryPath + " hook session"},
+			},
+		}
 		preHook := map[string]any{
 			"matcher": "Grep|Glob",
 			"hooks": []map[string]any{
@@ -84,7 +89,8 @@ var hooksInstallCmd = &cobra.Command{
 			hooks = make(map[string]any)
 		}
 
-		// Set PreToolUse — replace any existing GoAtlas entries
+		// Set hooks — replace any existing GoAtlas entries
+		hooks["SessionStart"] = mergeHookEntries(hooks["SessionStart"], sessionHook, "hook session")
 		hooks["PreToolUse"] = mergeHookEntries(hooks["PreToolUse"], preHook, "hook pre")
 		hooks["PostToolUse"] = mergeHookEntries(hooks["PostToolUse"], postHook, "hook post")
 
@@ -100,6 +106,7 @@ var hooksInstallCmd = &cobra.Command{
 		}
 
 		fmt.Printf("✅ GoAtlas Claude Code hooks installed in %s\n", settingsFile)
+		fmt.Printf("   SessionStart:                    → %s hook session\n", binaryPath)
 		fmt.Printf("   PreToolUse:  Grep|Glob           → %s hook pre\n", binaryPath)
 		fmt.Printf("   PostToolUse: Write|Edit|MultiEdit → %s hook post\n", binaryPath)
 
@@ -145,7 +152,8 @@ var hooksUninstallCmd = &cobra.Command{
 			return nil
 		}
 
-		// Remove GoAtlas entries from PreToolUse and PostToolUse
+		// Remove GoAtlas entries from all hook events
+		hooks["SessionStart"] = removeGoatlasEntries(hooks["SessionStart"], "goatlas hook")
 		hooks["PreToolUse"] = removeGoatlasEntries(hooks["PreToolUse"], "goatlas hook")
 		hooks["PostToolUse"] = removeGoatlasEntries(hooks["PostToolUse"], "goatlas hook")
 		settings["hooks"] = hooks
