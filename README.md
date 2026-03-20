@@ -269,6 +269,7 @@ GoAtlas supports **Gemini** (default), **Ollama** (local), and any **OpenAI-comp
 | `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible API base URL |
 | `OPENAI_API_KEY` | — | API key (use `ignored` for servers that don't need auth) |
 | `OPENAI_MODEL` | `gpt-3.5-turbo` | OpenAI-compatible chat model |
+| `OPENAI_EMBED_BASE_URL` | same as `OPENAI_BASE_URL` | Separate base URL for embedding requests (useful when running chat and embed on different servers) |
 | `OPENAI_EMBED_MODEL` | `text-embedding-ada-002` | OpenAI-compatible embedding model |
 
 **Ollama example** — run entirely locally:
@@ -374,6 +375,7 @@ goatlas migrate                   # run database migrations
 | `OPENAI_BASE_URL` | `http://localhost:8001/v1` | OpenAI-compatible API base URL |
 | `OPENAI_API_KEY` | — | API key (use `ignored` if not needed) |
 | `OPENAI_MODEL` | `gpt-3.5-turbo` | OpenAI-compatible chat model |
+| `OPENAI_EMBED_BASE_URL` | same as `OPENAI_BASE_URL` | Separate base URL for embedding requests |
 | `OPENAI_EMBED_MODEL` | `text-embedding-ada-002` | OpenAI-compatible embedding model |
 | `REPO_PATH` | cwd | Default repository path |
 
