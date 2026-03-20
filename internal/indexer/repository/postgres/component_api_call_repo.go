@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"strings"
+	"unicode"
 
 	"github.com/xdotech/goatlas/internal/indexer/domain"
 	"github.com/jackc/pgx/v5"
@@ -57,18 +59,66 @@ func (r *ComponentAPICallRepo) FindByComponent(ctx context.Context, component st
 }
 
 // FindByAPIPath returns all component API calls matching a given API path pattern.
+// The input path is normalized to match stored normalized paths.
 func (r *ComponentAPICallRepo) FindByAPIPath(ctx context.Context, apiPath string) ([]domain.ComponentAPICall, error) {
+	normalized := normalizeAPIPath(apiPath)
 	rows, err := r.pool.Query(ctx, `
 		SELECT c.id, c.file_id, c.component, c.http_method, c.api_path, c.target_service, c.line, c.col
 		FROM component_api_calls c
 		WHERE c.api_path ILIKE '%' || $1 || '%'
 		ORDER BY c.component
-	`, apiPath)
+	`, normalized)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanComponentAPICalls(rows)
+}
+
+// normalizeAPIPath strips /api prefix and replaces numeric/param segments with {id}.
+func normalizeAPIPath(path string) string {
+	normalized := strings.TrimPrefix(path, "/api")
+	if normalized == "" || !strings.HasPrefix(normalized, "/") {
+		normalized = path
+	}
+	segments := strings.Split(normalized, "/")
+	for i, seg := range segments {
+		if seg == "" {
+			continue
+		}
+		if strings.HasPrefix(seg, ":") || strings.HasPrefix(seg, "$") || strings.HasPrefix(seg, "{") {
+			segments[i] = "{id}"
+			continue
+		}
+		if isAllDigits(seg) || isHexUUID(seg) {
+			segments[i] = "{id}"
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+func isHexUUID(s string) bool {
+	if len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-' {
+		return true
+	}
+	if len(s) == 32 {
+		for _, r := range s {
+			if !unicode.Is(unicode.Hex_Digit, r) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func scanComponentAPICalls(rows pgx.Rows) ([]domain.ComponentAPICall, error) {

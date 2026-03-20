@@ -43,8 +43,10 @@ func (r *EndpointRepo) DeleteByFileID(ctx context.Context, fileID int64) error {
 }
 
 // List returns API endpoints, optionally filtered by HTTP method and service (repository name).
+// Uses DISTINCT ON (method, path) to deduplicate endpoints from nested/repeated repos.
 func (r *EndpointRepo) List(ctx context.Context, method, service string) ([]domain.APIEndpoint, error) {
-	query := `SELECT e.id, e.file_id, e.method, e.path, e.handler_name, e.framework, e.line,
+	query := `SELECT DISTINCT ON (e.method, e.path)
+	                  e.id, e.file_id, e.method, e.path, e.handler_name, e.framework, e.line,
 	                  f.path AS file_path, COALESCE(r.name, '') AS repo_name
 	           FROM api_endpoints e
 	           JOIN files f ON e.file_id = f.id
@@ -63,7 +65,7 @@ func (r *EndpointRepo) List(ctx context.Context, method, service string) ([]doma
 		argN++
 	}
 	_ = argN
-	query += " ORDER BY e.path, e.method"
+	query += " ORDER BY e.method, e.path, r.last_indexed_at DESC NULLS LAST"
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {

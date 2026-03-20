@@ -33,6 +33,10 @@ var constRefArgRe = regexp.MustCompile(`\.\s*(?:get|post|put|patch|delete)\s*\(\
 // Matches: function ComponentName(, const ComponentName =, export default function ComponentName
 var reactComponentRe = regexp.MustCompile(`(?:(?:export\s+(?:default\s+)?)?function|const)\s+([A-Z][a-zA-Z0-9]*)\s*[=(]`)
 
+// React hook detection pattern.
+// Matches: const useActivityTimeline = ..., function useActivityTimeline(, export function useFoo(
+var reactHookRe = regexp.MustCompile(`(?:export\s+)?(?:const|function)\s+(use[A-Z][a-zA-Z0-9]*)\s*[=(]`)
+
 // DetectComponentAPICalls scans a TS/JSX file and detects which React component
 // makes which API calls. This is component-level detection (not file-level).
 func DetectComponentAPICalls(filePath string, patterns []TSAPIPattern) ([]domain.ComponentAPICall, error) {
@@ -68,12 +72,20 @@ func DetectComponentAPICalls(filePath string, patterns []TSAPIPattern) ([]domain
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
-		// Track current React component scope
+		// Track current React component scope (PascalCase functions)
 		if matches := reactComponentRe.FindStringSubmatch(line); len(matches) >= 2 {
 			candidateName := matches[1]
 			// Heuristic: React component names are PascalCase and typically > 2 chars
 			if len(candidateName) > 2 && candidateName[0] >= 'A' && candidateName[0] <= 'Z' {
 				currentComponent = candidateName
+				componentBraceStart = braceDepth
+			}
+		}
+
+		// Also track React hook scope (useXxx pattern — camelCase starting with "use")
+		if currentComponent == "" {
+			if hookMatches := reactHookRe.FindStringSubmatch(line); len(hookMatches) >= 2 {
+				currentComponent = hookMatches[1]
 				componentBraceStart = braceDepth
 			}
 		}
@@ -144,6 +156,10 @@ func DetectComponentAPICalls(filePath string, patterns []TSAPIPattern) ([]domain
 			}
 
 			if apiPath != "" || targetService != "" {
+				// Normalize path segments so dynamic IDs become {id} for better matching
+				if apiPath != "" && strings.HasPrefix(apiPath, "/") {
+					apiPath = NormalizePath(apiPath)
+				}
 				call := domain.ComponentAPICall{
 					Component:     componentName,
 					HttpMethod:    method,
