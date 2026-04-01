@@ -1,13 +1,15 @@
 services:
   goatlas:
     build: .
+    stdin_open: true
+    tty: true
     environment:
       DATABASE_DSN: postgres://goatlas:goatlas@postgres:5432/goatlas
       NEO4J_URL: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASS: goatlas_neo4j
       QDRANT_URL: http://qdrant:6334
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       EMBED_PROVIDER: ${EMBED_PROVIDER:-gemini}
       OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
